@@ -142,69 +142,59 @@ class GameScoreTracker {
   }
 
   void _awardPointToPlayer1() {
-    // Handle advantage/deuce scenarios
-    if (_player1Score == GameScore.advantage) {
-      // Player 1 had advantage and wins the point -> game won
-      _player1Score = GameScore.gameWon;
-      _gameEnded = true;
-      return;
-    }
-
-    if (_player2Score == GameScore.advantage) {
-      // Player 2 had advantage, player 1 wins point -> back to deuce
-      _player1Score = GameScore.forty;
-      _player2Score = GameScore.forty;
-      return;
-    }
-
-    // Handle 40-40 deuce
-    if (_player1Score == GameScore.forty && _player2Score == GameScore.forty) {
-      _player1Score = GameScore.advantage;
-      return;
-    }
-
-    // Handle winning from 40
-    if (_player1Score == GameScore.forty) {
-      _player1Score = GameScore.gameWon;
-      _gameEnded = true;
-      return;
-    }
-
-    // Normal score progression
-    _player1Score = _nextScore(_player1Score);
+    _updateScore(
+      winnerScore: () => _player1Score,
+      loserScore: () => _player2Score,
+      setWinnerScore: (score) => _player1Score = score,
+      setLoserScore: (score) => _player2Score = score,
+    );
   }
 
   void _awardPointToPlayer2() {
+    _updateScore(
+      winnerScore: () => _player2Score,
+      loserScore: () => _player1Score,
+      setWinnerScore: (score) => _player2Score = score,
+      setLoserScore: (score) => _player1Score = score,
+    );
+  }
+
+  void _updateScore({
+    required GameScore Function() winnerScore,
+    required GameScore Function() loserScore,
+    required void Function(GameScore) setWinnerScore,
+    required void Function(GameScore) setLoserScore,
+  }) {
     // Handle advantage/deuce scenarios
-    if (_player2Score == GameScore.advantage) {
-      // Player 2 had advantage and wins the point -> game won
-      _player2Score = GameScore.gameWon;
+    if (winnerScore() == GameScore.advantage) {
+      // Winner had advantage and wins the point -> game won
+      setWinnerScore(GameScore.gameWon);
       _gameEnded = true;
       return;
     }
 
-    if (_player1Score == GameScore.advantage) {
-      // Player 1 had advantage, player 2 wins point -> back to deuce
-      _player1Score = GameScore.forty;
-      _player2Score = GameScore.forty;
+    if (loserScore() == GameScore.advantage) {
+      // Loser had advantage, winner wins point -> back to deuce
+      setWinnerScore(GameScore.forty);
+      setLoserScore(GameScore.forty);
       return;
     }
 
     // Handle 40-40 deuce
-    if (_player1Score == GameScore.forty && _player2Score == GameScore.forty) {
-      _player2Score = GameScore.advantage;
+    if (winnerScore() == GameScore.forty && loserScore() == GameScore.forty) {
+      setWinnerScore(GameScore.advantage);
       return;
     }
 
     // Handle winning from 40
-    if (_player2Score == GameScore.forty) {
-      _player2Score = GameScore.gameWon;
+    if (winnerScore() == GameScore.forty) {
+      setWinnerScore(GameScore.gameWon);
       _gameEnded = true;
       return;
     }
 
     // Normal score progression
-    _player2Score = _nextScore(_player2Score);
+    setWinnerScore(_nextScore(winnerScore()));
   }
 
   GameScore _nextScore(GameScore current) {
