@@ -100,8 +100,8 @@ class GameScoreTracker {
   bool get isGameEnded => _gameEnded;
 
   /// Gets whether the current state is deuce (both players at 40).
-  bool get isDeuce => 
-      _player1Score == GameScore.forty && 
+  bool get isDeuce =>
+      _player1Score == GameScore.forty &&
       _player2Score == GameScore.forty;
 
   /// Gets the winner if the game has ended, null otherwise.
