@@ -6,3 +6,4 @@ export 'actions/actions.dart';
 export 'turn/turn.dart';
 export 'turn_manager.dart';
 export 'match_manager.dart';
+export 'game_score_tracker.dart';
