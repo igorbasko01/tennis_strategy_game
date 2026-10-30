@@ -12,7 +12,15 @@ Outsmart your opponent by choosing your shots and anticipating theirs. Both play
 - **Bundled action system** - Select both your attack and anticipation in one turn
 - **Skill-based resolution** - Outcomes determined by skill, shot difficulty, and prediction accuracy
 
-## 🏗️ Project Structure
+## 🌐 Play in the browser
+
+A web version built with three.js lives in [`webapp/`](webapp/). It runs on phones and desktops and deploys to GitHub Pages or Cloudflare Pages. See [webapp/README.md](webapp/README.md).
+
+```bash
+cd webapp && npm install && npm run dev
+```
+
+## 🏗️ Project Structure (Flutter)
 
 ```
 lib/
