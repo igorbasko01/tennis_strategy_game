@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0d3b1a" />
+    <meta name="description" content="A simultaneous turn-based tennis strategy game. Pick your shot, read your opponent." />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <title>Tennis Strategy</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="scoreboard"></header>
+      <main id="stage">
+        <div id="situation" class="situation hidden"></div>
+        <div id="callout" class="callout"></div>
+      </main>
+      <section id="panel" aria-live="polite"></section>
+    </div>
+
+    <div id="menu" class="overlay">
+      <div class="menu-card">
+        <div class="ball-icon" aria-hidden="true"></div>
+        <h1>Tennis<br />Strategy</h1>
+        <p class="tagline">Outsmart your opponent</p>
+
+        <div class="setting">
+          <span class="setting-label">Opponent</span>
+          <div class="segmented" data-setting="mode">
+            <button data-value="cpu">vs CPU</button>
+            <button data-value="local">2 Players</button>
+          </div>
+        </div>
+        <div class="setting" data-only="cpu">
+          <span class="setting-label">CPU level</span>
+          <div class="segmented" data-setting="level">
+            <button data-value="rookie">Rookie</button>
+            <button data-value="pro">Pro</button>
+            <button data-value="champion">Champion</button>
+          </div>
+        </div>
+        <div class="setting">
+          <span class="setting-label">Match</span>
+          <div class="segmented" data-setting="length">
+            <button data-value="quick">1 set · 4</button>
+            <button data-value="standard">1 set · 6</button>
+            <button data-value="full">Best of 3</button>
+          </div>
+        </div>
+
+        <button id="start" class="primary big">Start match</button>
+        <button id="resume" class="ghost hidden">Resume match</button>
+        <button class="ghost" data-open-help>How to play</button>
+      </div>
+    </div>
+
+    <div id="handoff" class="overlay hidden"></div>
+
+    <div id="help" class="overlay hidden">
+      <div class="sheet">
+        <div class="sheet-head">
+          <h2>How to play</h2>
+          <button class="icon-btn" data-close-help aria-label="Close">✕</button>
+        </div>
+        <div id="help-body"></div>
+      </div>
+    </div>
+
+    <div id="over" class="overlay hidden"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
