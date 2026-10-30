@@ -61,21 +61,26 @@ const READ_LATERAL: Record<ServeReceiveAction, number> = { wide: 3.6, neutral: 2
 export const serveReadSpot = (receiver: PlayerIndex, side: ServeSide, read: ServeReceiveAction): Spot =>
   fromLocal(receiver, deuceSign(side) * READ_LATERAL[read], COURT.halfLength + 0.3);
 
-/** +1 if the hitter is on their forehand (right) side, -1 on their backhand side. */
-const wing = (hitter: PlayerIndex, from: Spot): 1 | -1 => (lateralOf(hitter, from) >= -0.3 ? 1 : -1);
+/** World-x sign of the half of the court the hitter is on; near the centre it is their forehand side. */
+const courtSide = (hitter: PlayerIndex, from: Spot): 1 | -1 => {
+  if (Math.abs(from.x) >= 0.05) return from.x > 0 ? 1 : -1;
+  return sideSign(hitter);
+};
 
 /** Where an attack bounces on the opponent's half. */
 export const attackLanding = (hitter: PlayerIndex, from: Spot, attack: AttackAction): Spot => {
-  const w = wing(hitter, from);
+  const s = courtSide(hitter, from);
+  const deep = (depth: number) => -sideSign(hitter) * depth;
   switch (attack) {
     case 'crossCourt':
-      return fromLocal(hitter, -w * 2.9, -9.2);
+      return { x: -s * 2.9, z: deep(9.2) };
     case 'downTheLine':
-      return fromLocal(hitter, w * 3.1, -9.6);
+      // Stays on the hitter's side so the ball travels roughly parallel to the sideline.
+      return { x: s * Math.min(Math.max(Math.abs(from.x), 2.2), 3.3), z: deep(9.6) };
     case 'centerDeep':
-      return fromLocal(hitter, 0.15 * w, -10.2);
+      return { x: 0.15 * s, z: deep(10.2) };
     case 'dropShot':
-      return fromLocal(hitter, -w * 1.3, -1.7);
+      return { x: -s * 1.3, z: deep(1.7) };
   }
 };
 
