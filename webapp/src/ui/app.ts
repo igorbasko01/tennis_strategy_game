@@ -13,19 +13,19 @@ import {
   SERVE_RECEIVE_LABEL,
   SERVE_RECEIVE_MODIFIER,
 } from '../engine/actions';
-import { AiOpponent, type AiLevel } from '../engine/ai';
+import { AiOpponent } from '../engine/ai';
 import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
 import type { ScoringConfig } from '../engine/scoring';
+import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
 import { CourtScene, type ZoneMarker } from '../scene/scene';
 import { Sound } from './sound';
 
-type Mode = 'cpu' | 'local';
 type Length = 'quick' | 'standard' | 'full';
 
 interface Settings {
-  mode: Mode;
-  level: AiLevel;
+  playerSkill: SkillTierId;
+  cpuSkill: SkillTierId;
   length: Length;
   muted: boolean;
 }
@@ -36,16 +36,21 @@ const LENGTHS: Record<Length, ScoringConfig> = {
   full: { setsToWin: 2, gamesPerSet: 6 },
 };
 
-const HUMAN_SKILL = 0.5;
-const CPU_SKILL: Record<AiLevel, number> = { rookie: 0.45, pro: 0.5, champion: 0.55 };
-
 const SETTINGS_KEY = 'tennis-strategy-settings';
-const DEFAULT_SETTINGS: Settings = { mode: 'cpu', level: 'pro', length: 'quick', muted: false };
+const DEFAULT_SETTINGS: Settings = { playerSkill: 'pro', cpuSkill: 'pro', length: 'quick', muted: false };
 
 const loadSettings = (): Settings => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<Settings>;
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...saved };
+      // Older saves may hold values from settings that no longer exist.
+      if (!skillTier(merged.playerSkill)) merged.playerSkill = DEFAULT_SETTINGS.playerSkill;
+      if (!skillTier(merged.cpuSkill)) merged.cpuSkill = DEFAULT_SETTINGS.cpuSkill;
+      if (!(merged.length in LENGTHS)) merged.length = DEFAULT_SETTINGS.length;
+      return merged;
+    }
   } catch {
     // Storage can be unavailable (private mode); defaults are fine.
   }
@@ -115,8 +120,8 @@ export class App {
   private readonly scene: CourtScene;
   private readonly sound = new Sound();
   private match: Match | null = null;
-  private ai: AiOpponent | null = null;
-  private names: [string, string] = ['You', 'CPU'];
+  private ai = new AiOpponent(null);
+  private readonly names: [string, string] = ['You', 'CPU'];
   /** Bumped whenever a match is abandoned so stale async flows stop. */
   private generation = 0;
   private markerTap: ((id: string) => void) | null = null;
@@ -136,10 +141,7 @@ export class App {
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       if (!$('#menu').classList.contains('hidden') || !$('#help').classList.contains('hidden')) return;
-      const handoff = $('#handoff');
-      const target = !handoff.classList.contains('hidden')
-        ? handoff.querySelector<HTMLButtonElement>('.primary')
-        : $('#panel').querySelector<HTMLButtonElement>('.primary:not([disabled])');
+      const target = $('#panel').querySelector<HTMLButtonElement>('.primary:not([disabled])');
       if (target) {
         e.preventDefault();
         target.click();
@@ -151,6 +153,11 @@ export class App {
 
   private bindMenu(): void {
     const menu = $('#menu');
+    for (const seg of menu.querySelectorAll<HTMLElement>('[data-skill-options]')) {
+      seg.innerHTML = SKILL_TIERS.map(
+        (t) => `<button data-value="${t.id}"><span>${t.label}</span><small>${t.skill.toFixed(1)}</small></button>`,
+      ).join('');
+    }
     const sync = () => {
       for (const seg of menu.querySelectorAll<HTMLElement>('.segmented')) {
         const key = seg.dataset.setting as keyof Settings;
@@ -160,14 +167,11 @@ export class App {
           b.setAttribute('aria-pressed', String(on));
         }
       }
-      for (const el of menu.querySelectorAll<HTMLElement>('[data-only]')) {
-        el.classList.toggle('hidden', el.dataset.only !== this.settings.mode);
-      }
     };
     menu.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.segmented button');
       if (!b) return;
-      const key = (b.parentElement as HTMLElement).dataset.setting as 'mode' | 'level' | 'length';
+      const key = (b.parentElement as HTMLElement).dataset.setting as 'playerSkill' | 'cpuSkill' | 'length';
       (this.settings as unknown as Record<string, string>)[key] = b.dataset.value!;
       saveSettings(this.settings);
       sync();
@@ -198,18 +202,18 @@ export class App {
   private startMatch(): void {
     const s = this.settings;
     this.generation++;
-    this.names = s.mode === 'cpu' ? ['You', 'CPU'] : ['Player 1', 'Player 2'];
-    const skills = s.mode === 'cpu' ? [HUMAN_SKILL, CPU_SKILL[s.level]] : [HUMAN_SKILL, HUMAN_SKILL];
+    const player = skillTier(s.playerSkill)!;
+    const cpu = skillTier(s.cpuSkill)!;
     const firstServer: PlayerIndex = Math.random() < 0.5 ? 0 : 1;
     this.match = new Match(
       [
-        { name: this.names[0], skill: skills[0] },
-        { name: this.names[1], skill: skills[1] },
+        { name: this.names[0], skill: player.skill },
+        { name: this.names[1], skill: cpu.skill },
       ],
       LENGTHS[s.length],
       firstServer,
     );
-    this.ai = s.mode === 'cpu' ? new AiOpponent(s.level) : null;
+    this.ai = new AiOpponent(cpu.cpuTemperature);
     $('#over').classList.add('hidden');
     this.showMenu(false);
     this.scene.animator.speed = 1;
@@ -219,28 +223,18 @@ export class App {
     void this.run(this.generation);
   }
 
-  private humans(): PlayerIndex[] {
-    return this.settings.mode === 'cpu' ? [0] : [0, 1];
-  }
-
   private async run(gen: number): Promise<void> {
     const match = this.match!;
     const alive = () => gen === this.generation;
     while (alive() && !match.isOver) {
-      for (const p of this.humans()) {
-        if (this.settings.mode === 'local') {
-          await this.handoff(p);
-          if (!alive()) return;
-        }
-        const choice = await this.choose(p);
-        if (!alive()) return;
-        match.submit(p, choice);
-      }
-      if (this.ai) match.submit(1, this.ai.choose(match, 1));
+      const choice = await this.choose(0);
+      if (!alive()) return;
+      match.submit(0, choice);
+      match.submit(1, this.ai.choose(match, 1));
 
       const choices = [...match.lockedChoices] as [Choice, Choice];
       const outcome = match.resolve(Math.random);
-      this.ai?.observe(choices[0], outcome.exchange);
+      this.ai.observe(choices[0], outcome.exchange);
 
       this.renderRevealing(choices);
       await this.scene.playExchange(outcome.exchange);
@@ -259,38 +253,17 @@ export class App {
     if (alive() && match.isOver) this.renderMatchOver();
   }
 
-  private handoff(p: PlayerIndex): Promise<void> {
-    const el = $('#handoff');
-    el.innerHTML = `
-      <div class="menu-card handoff-card">
-        <div class="player-chip p${p}">${escapeHtml(this.names[p])}</div>
-        <h2>Your turn</h2>
-        <p class="tagline">Pass the device to ${escapeHtml(this.names[p])}.<br/>${escapeHtml(this.names[other(p)])}, no peeking!</p>
-        <button class="primary big">I'm ready</button>
-      </div>`;
-    el.classList.remove('hidden');
-    $('#panel').innerHTML = '';
-    this.scene.clearMarkers();
-    return new Promise((resolve) => {
-      el.querySelector('button')!.addEventListener('click', () => {
-        el.classList.add('hidden');
-        resolve();
-      });
-    });
-  }
-
   /** Lets player p pick both halves of their bundled decision. */
   private choose(p: PlayerIndex): Promise<Choice> {
     const match = this.match!;
     const kind = match.expectedChoice(p);
     const opp = this.names[other(p)];
-    const you = this.settings.mode === 'cpu';
 
     let heading: string;
     let groups: GroupDef[];
     let markers: ZoneMarker[];
     if (kind === 'server') {
-      heading = you ? 'Your serve' : `${this.names[p]} to serve`;
+      heading = 'Your serve';
       groups = [
         { key: 'target', title: 'Serve target', options: serveTargetOptions() },
         { key: 'read', title: `Cover ${opp}'s return`, options: defendReadOptions() },
@@ -300,7 +273,7 @@ export class App {
         ...this.scene.readMarkersFor(p, 'attack', ATTACK_LABEL),
       ];
     } else if (kind === 'receiver') {
-      heading = you ? `Returning ${opp}'s serve` : `${this.names[p]} to return`;
+      heading = `Returning ${opp}'s serve`;
       groups = [
         { key: 'read', title: 'Read the serve', options: serveReadOptions() },
         { key: 'target', title: 'Return target', options: attackTargetOptions() },
@@ -311,7 +284,7 @@ export class App {
       ];
     } else {
       const striking = p === match.server;
-      heading = striking ? (you ? 'Your shot' : `${this.names[p]} on the ball`) : you ? `${opp} is on the ball` : `${this.names[p]} defending`;
+      heading = striking ? 'Your shot' : `${opp} is on the ball`;
       const target: GroupDef = { key: 'target', title: striking ? 'Attack' : 'Counter-attack', options: attackTargetOptions() };
       const read: GroupDef = { key: 'read', title: striking ? `Cover ${opp}'s reply` : `Cover ${opp}'s attack`, options: defendReadOptions() };
       groups = striking ? [target, read] : [read, target];
@@ -452,20 +425,13 @@ export class App {
     const ex = outcome.exchange;
     const winner = ex.pointWinner;
     const verb: Record<Duel['kind'], string> = { serve: 'Serve', return: 'Return', attack: 'Attack', counter: 'Counter' };
-    const headline =
-      winner === null
-        ? 'Rally continues'
-        : this.settings.mode === 'cpu'
-          ? winner === 0
-            ? 'Point won!'
-            : 'Point lost'
-          : `Point ${this.names[winner]}`;
+    const headline = winner === null ? 'Rally continues' : winner === 0 ? 'Point won!' : 'Point lost';
     const nextLabel = winner === null ? 'Next shot' : match.isOver ? 'See result' : 'Next point';
 
     const panel = $('#panel');
     panel.innerHTML = `
       <div class="panel-head">
-        <span class="role ${winner === null ? '' : winner === 0 || this.settings.mode === 'local' ? 'good' : 'bad'}">${escapeHtml(headline)}</span>
+        <span class="role ${winner === null ? '' : winner === 0 ? 'good' : 'bad'}">${escapeHtml(headline)}</span>
         <span class="context">skill <i>shot/read</i> <i class="luck">luck</i></span>
       </div>
       <div class="duels">
@@ -497,8 +463,8 @@ export class App {
     if (outcome.event === 'game') sub = `Game ${name}`;
     if (outcome.event === 'set') sub = `Set ${name}`;
     if (outcome.event === 'match') sub = `Game, set & match ${name}`;
-    this.callout(shot, sub, this.settings.mode === 'cpu' ? (w === 0 ? 'good' : 'bad') : '');
-    this.sound.point(this.settings.mode === 'local' || w === 0);
+    this.callout(shot, sub, w === 0 ? 'good' : 'bad');
+    this.sound.point(w === 0);
   }
 
   private callout(text: string, sub: string, tone = ''): void {
@@ -559,7 +525,7 @@ export class App {
       ['Service pts won', (p) => `${st[p].servicePointsWon}/${st[p].servicePointsPlayed}`],
       ['Correct reads', (p) => `${st[p].readsCorrect}/${st[p].readsMade} (${pct(st[p].readsCorrect, st[p].readsMade)})`],
     ];
-    const title = this.settings.mode === 'cpu' ? (w === 0 ? 'You win!' : 'CPU wins') : `${this.names[w]} wins!`;
+    const title = w === 0 ? 'You win!' : 'CPU wins';
     const el = $('#over');
     el.innerHTML = `
       <div class="menu-card">
@@ -624,7 +590,8 @@ export class App {
       <ul>
         <li>Safe shots (Body, Center Deep) cost less but are easier to read.</li>
         <li>A correctly read drop shot gets a big +0.6 bonus — don't get predictable with it.</li>
-        <li>The CPU learns your habits as the match goes on. Mix it up!</li>
+        <li>Skill (0.3 Beginner to 0.7 Legend) is added to every shot and read. Pick yours and the CPU's on the menu.</li>
+        <li>From Club up, the CPU learns your habits as the match goes on, and the higher its tier the harder it exploits them. Mix it up!</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;
   }

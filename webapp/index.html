@@ -30,19 +30,12 @@
         <p class="tagline">Outsmart your opponent</p>
 
         <div class="setting">
-          <span class="setting-label">Opponent</span>
-          <div class="segmented" data-setting="mode">
-            <button data-value="cpu">vs CPU</button>
-            <button data-value="local">2 Players</button>
-          </div>
+          <span class="setting-label">Your skill</span>
+          <div class="segmented skills" data-setting="playerSkill" data-skill-options></div>
         </div>
-        <div class="setting" data-only="cpu">
-          <span class="setting-label">CPU level</span>
-          <div class="segmented" data-setting="level">
-            <button data-value="rookie">Rookie</button>
-            <button data-value="pro">Pro</button>
-            <button data-value="champion">Champion</button>
-          </div>
+        <div class="setting">
+          <span class="setting-label">CPU skill</span>
+          <div class="segmented skills" data-setting="cpuSkill" data-skill-options></div>
         </div>
         <div class="setting">
           <span class="setting-label">Match</span>
@@ -58,8 +51,6 @@
         <button class="ghost" data-open-help>How to play</button>
       </div>
     </div>
-
-    <div id="handoff" class="overlay hidden"></div>
 
     <div id="help" class="overlay hidden">
       <div class="sheet">
