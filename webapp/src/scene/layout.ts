@@ -103,3 +103,67 @@ export const pastSpot = (from: Spot, to: Spot, extra: number): Spot => {
 /** Where a player drifts back to between exchanges. */
 export const recoverySpot = (p: PlayerIndex, current: Spot): Spot =>
   fromLocal(p, lateralOf(p, current) * 0.35, Math.max(COURT.halfLength - 0.3, Math.abs(current.z)));
+
+export type DecisionKind = 'server' | 'receiver' | 'striker' | 'defender';
+
+export interface DecisionSpots {
+  /** Where each of the player's target options would land. */
+  targets: Record<string, Spot>;
+  /** Where each of the player's read options would take them. */
+  reads: Record<string, Spot>;
+}
+
+const SERVE_ACTIONS = ['wide', 'body', 'tLine'] as const;
+const READS = ['wide', 'neutral', 'tLine'] as const;
+const ATTACKS = ['crossCourt', 'downTheLine', 'centerDeep', 'dropShot'] as const;
+/** The serve each serve read anticipates. */
+const SERVE_FOR_READ: Record<ServeReceiveAction, ServeAction> = { wide: 'wide', neutral: 'body', tLine: 'tLine' };
+
+const mapOf = <K extends string>(keys: readonly K[], spot: (k: K) => Spot): Record<string, Spot> =>
+  Object.fromEntries(keys.map((k) => [k, spot(k)]));
+
+/**
+ * Zone positions for a player's bundled decision. Each half depends on the
+ * other: a shot is hit from wherever the player's read takes them, and the
+ * opponent replies from wherever the player's own shot sends them.
+ */
+export const decisionSpots = (
+  p: PlayerIndex,
+  kind: DecisionKind,
+  side: ServeSide,
+  mySpot: Spot,
+  oppSpot: Spot,
+  selected: { target: string | null; read: string | null },
+): DecisionSpots => {
+  const opp: PlayerIndex = p === 0 ? 1 : 0;
+  switch (kind) {
+    case 'server': {
+      const oppFrom = selected.target ? serveContact(p, side, selected.target as ServeAction) : oppSpot;
+      return {
+        targets: mapOf(SERVE_ACTIONS, (s) => serveLanding(p, side, s)),
+        reads: mapOf(ATTACKS, (a) => attackContact(opp, oppFrom, a)),
+      };
+    }
+    case 'receiver': {
+      const myFrom = selected.read ? serveContact(opp, side, SERVE_FOR_READ[selected.read as ServeReceiveAction]) : mySpot;
+      return {
+        targets: mapOf(ATTACKS, (a) => attackLanding(p, myFrom, a)),
+        reads: mapOf(READS, (r) => serveReadSpot(p, side, r)),
+      };
+    }
+    case 'striker': {
+      const oppFrom = selected.target ? attackContact(p, mySpot, selected.target as AttackAction) : oppSpot;
+      return {
+        targets: mapOf(ATTACKS, (a) => attackLanding(p, mySpot, a)),
+        reads: mapOf(ATTACKS, (a) => attackContact(opp, oppFrom, a)),
+      };
+    }
+    case 'defender': {
+      const myFrom = selected.read ? attackContact(opp, oppSpot, selected.read as AttackAction) : mySpot;
+      return {
+        targets: mapOf(ATTACKS, (a) => attackLanding(p, myFrom, a)),
+        reads: mapOf(ATTACKS, (a) => attackContact(opp, oppSpot, a)),
+      };
+    }
+  }
+};

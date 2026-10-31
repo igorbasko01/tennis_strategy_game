@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import type { AttackAction, ServeAction } from '../engine/actions';
+import { ATTACK_LABEL, SERVE_LABEL, SERVE_RECEIVE_LABEL, type AttackAction, type ServeAction } from '../engine/actions';
 import type { Duel, Exchange, PlayerIndex } from '../engine/resolution';
 import { Animator, easeInOut, easeOut } from './animator';
 import {
   COURT,
   attackContact,
+  decisionSpots,
   attackLanding,
   pastSpot,
   receiverStart,
@@ -14,6 +15,7 @@ import {
   serveReadSpot,
   serverStart,
   sideSign,
+  type DecisionKind,
   type ServeSide,
   type Spot,
 } from './layout';
@@ -592,42 +594,19 @@ export class CourtScene {
     this.setBall(this.ball.position, false);
   }
 
-  /** Hit target markers from player p's current position. */
-  targetMarkersFor(p: PlayerIndex, phase: 'serve' | 'rally', labels: Record<string, string>): ZoneMarker[] {
-    if (phase === 'serve') {
-      return (['wide', 'body', 'tLine'] as const).map((s) => ({
-        id: `target:${s}`,
-        kind: 'target',
-        label: labels[s],
-        spot: serveLanding(p, this.side, s),
-      }));
-    }
-    const from = this.players[p].spot;
-    return (['crossCourt', 'downTheLine', 'centerDeep', 'dropShot'] as const).map((a) => ({
-      id: `target:${a}`,
-      kind: 'target',
-      label: labels[a],
-      spot: attackLanding(p, from, a),
-    }));
-  }
-
-  /** Read/cover markers for player p against the opponent's next shot. */
-  readMarkersFor(p: PlayerIndex, against: 'serve' | 'attack', labels: Record<string, string>): ZoneMarker[] {
+  /** Zone markers for player p's decision, positioned from their current selections. */
+  decisionMarkers(
+    p: PlayerIndex,
+    kind: DecisionKind,
+    selected: { target: string | null; read: string | null },
+  ): ZoneMarker[] {
     const opp: PlayerIndex = p === 0 ? 1 : 0;
-    if (against === 'serve') {
-      return (['wide', 'neutral', 'tLine'] as const).map((r) => ({
-        id: `read:${r}`,
-        kind: 'read',
-        label: labels[r],
-        spot: serveReadSpot(p, this.side, r),
-      }));
-    }
-    const from = this.players[opp].spot;
-    return (['crossCourt', 'downTheLine', 'centerDeep', 'dropShot'] as const).map((a) => ({
-      id: `read:${a}`,
-      kind: 'read',
-      label: labels[a],
-      spot: attackContact(opp, from, a),
-    }));
+    const spots = decisionSpots(p, kind, this.side, this.players[p].spot, this.players[opp].spot, selected);
+    const targetLabels: Record<string, string> = kind === 'server' ? SERVE_LABEL : ATTACK_LABEL;
+    const readLabels: Record<string, string> = kind === 'receiver' ? SERVE_RECEIVE_LABEL : ATTACK_LABEL;
+    return [
+      ...Object.entries(spots.targets).map(([id, spot]): ZoneMarker => ({ id: `target:${id}`, kind: 'target', label: targetLabels[id], spot })),
+      ...Object.entries(spots.reads).map(([id, spot]): ZoneMarker => ({ id: `read:${id}`, kind: 'read', label: readLabels[id], spot })),
+    ];
   }
 }
