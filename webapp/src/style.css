@@ -364,6 +364,15 @@ button:focus-visible {
   color: var(--read);
 }
 
+.context i.position.good,
+.calc-math i.position.good {
+  color: var(--good);
+}
+
+.calc-math i.position.bad {
+  color: var(--bad);
+}
+
 .group {
   margin-bottom: 10px;
 }
@@ -568,22 +577,23 @@ button:focus-visible {
 }
 
 .calc {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 2px;
   font-size: 13px;
   padding: 2px 0;
 }
 
 .calc-what {
+  flex: 1 0 auto;
   color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .calc-math {
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
