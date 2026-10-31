@@ -493,7 +493,7 @@ export class App {
       <div class="calc">
         <span class="player-chip p${who}">${escapeHtml(this.names[who])}</span>
         <span class="calc-what">${what}</span>
-        <span class="calc-math">${c.skill.toFixed(2)} <i>${fmt(c.modifier)}</i>${c.position === 0 ? '' : ` <i class="position ${c.position > 0 ? 'good' : 'bad'}">${fmt(c.position)}</i>`} <i class="luck">${fmt(c.random)}</i> = <b>${c.total.toFixed(2)}</b></span>
+        <span class="calc-math">${c.skill.toFixed(2)} <i>${fmt(c.modifier)}</i>${c.position === 0 ? '' : ` <i class="position ${c.position > 0 ? 'good' : 'bad'}">${fmt(c.position)}</i>`}${c.energy === 0 ? '' : ` <i class="energy">${fmt(c.energy)}</i>`} <i class="luck">${fmt(c.random)}</i> = <b>${c.total.toFixed(2)}</b></span>
       </div>`;
   }
 
@@ -514,7 +514,7 @@ export class App {
     panel.innerHTML = `
       <div class="panel-head">
         <span class="role ${winner === null ? '' : winner === 0 ? 'good' : 'bad'}">${escapeHtml(headline)}</span>
-        <span class="context">skill <i>shot/read</i> <i class="position good">position</i> <i class="luck">luck</i></span>
+        <span class="context">skill <i>shot/read</i> <i class="position good">position</i> <i class="energy">energy</i> <i class="luck">luck</i></span>
       </div>
       <div class="duels">
         ${ex.duels
@@ -569,6 +569,7 @@ export class App {
         <div class="sb-row">
           <span class="serve-dot ${m.server === p && !m.isOver ? 'on' : ''}"></span>
           <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}</span>
+          ${m.isOver ? '' : this.energyBar(m.energy[p])}
           ${sets}
           <span class="set current">${m.isOver ? '' : m.score.games[p]}</span>
           <span class="pts">${m.isOver ? '' : m.score.pointLabel(p)}</span>
@@ -593,6 +594,12 @@ export class App {
     const s = m && !m.isOver ? m.score.situation() : null;
     sit.textContent = s ?? '';
     sit.classList.toggle('hidden', !s);
+  }
+
+  private energyBar(energy: number): string {
+    const pct = Math.round(energy * 100);
+    const level = pct > 60 ? 'high' : pct > 30 ? 'mid' : 'low';
+    return `<span class="energy-bar ${level}" role="img" aria-label="Energy ${pct}%" title="Energy ${pct}%"><i style="width:${pct}%"></i></span>`;
   }
 
   private renderMatchOver(): void {
@@ -789,7 +796,7 @@ export class App {
       (<span class="swatch target"></span> target) and where to cover the opponent's next ball
       (<span class="swatch read"></span> read). Then both are revealed and resolved.</p>
       <h3>Resolution</h3>
-      <p><b>Shot</b> = skill + shot risk + position + luck<br/><b>Read</b> = skill + read bonus/penalty + luck<br/>
+      <p><b>Shot</b> = skill + shot risk + position + energy + luck<br/><b>Read</b> = skill + read bonus/penalty + energy + luck<br/>
       Luck is a random roll between −0.3 and +0.3. If the shot beats the read, the hitter wins the point.
       Otherwise the ball comes back, and the defender's own shot is tested against the hitter's read.
       If both shots are covered, the rally continues with a new set of choices.</p>
@@ -797,6 +804,12 @@ export class App {
       <p>Your read also sets up your next shot. A third of your read bonus or penalty carries into the next ball you hit:
       a correct read puts you <b>in position</b> (+0.1, or +0.2 after reading a drop shot), and a lucky cover after
       a wrong read leaves you <b>stretched</b> (down to −0.2). Serves always start from a neutral position.</p>
+      <h3>Energy</h3>
+      <p>Both players start every match with full energy (the bar by each name). Running costs energy: defending,
+      especially drop shots, and most of all changing direction after a wrong read. You win a little back after
+      every point and more at changeovers.</p>
+      <p>While you are fresh you can scramble back from a wrong read and recover up to half its penalty, so early
+      rallies last longer. As you tire that recovery fades, and every shot and read loses up to −0.15.</p>
       <h3>Serve vs. read</h3>
       <p class="small">Rows: serve (risk). Columns: receiver's read.</p>
       ${serveTable}

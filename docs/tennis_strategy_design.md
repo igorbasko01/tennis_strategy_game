@@ -58,6 +58,20 @@ This applies to the return (from the serve read), the counter-attack (from the r
 
 Shot total: skill \+ action cost \+ position \+ random factor.
 
+### Energy
+
+Each player has energy from 100% (fresh) to 0% (exhausted), full at the start of every match.
+
+1. Spending: defending a shot costs energy by how far it moves the defender (Drop Shot the most, Body and Center Deep the least); a wrong read costs extra, more the worse the read; hitting costs a little.
+2. Recovery: a little after every point, more at each changeover (after every odd game of a set).
+3. Fatigue: every shot and read gets a penalty of up to \-0.15, scaling with energy lost.
+4. Scramble: a wrong read gets back up to half of its penalty, scaling with energy left, so fresh players keep early rallies alive and tired ones do not.
+
+Shot total: skill \+ action cost \+ position \+ fatigue \+ random factor.  
+Read total: skill \+ read modifier \+ fatigue \+ scramble \+ random factor.
+
+The worked examples below leave energy out.
+
 ### Actions Cost:
 
 1. Serve Actions:  

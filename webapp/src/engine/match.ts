@@ -11,6 +11,7 @@ import {
   type Rng,
   type ServerChoice,
 } from './resolution';
+import { CHANGEOVER_RECOVERY, FULL_ENERGY, POINT_RECOVERY, duelCost, regain, spend } from './energy';
 import { Score, type PointEvent, type ScoringConfig } from './scoring';
 
 export interface PlayerConfig {
@@ -65,6 +66,8 @@ export class Match {
   exchangeCount = 0;
   /** Position carry-over for the server's first shot of the next rally exchange. */
   private strikerPosition = 0;
+  /** Each player's energy, 0-1; full at the start of the match. */
+  energy: [number, number] = [FULL_ENERGY, FULL_ENERGY];
   private choices: [Choice | null, Choice | null] = [null, null];
 
   constructor(players: readonly [PlayerConfig, PlayerConfig], scoring: ScoringConfig, firstServer: PlayerIndex = 0) {
@@ -120,13 +123,14 @@ export class Match {
     const skills = [this.players[0].skill, this.players[1].skill] as const;
     const exchange =
       this.phase === 'serve'
-        ? resolveServeExchange(s, skills, this.choices[s] as ServerChoice, this.choices[r] as ReceiverChoice, rng)
-        : resolveRallyExchange(s, skills, this.choices[s] as RallyChoice, this.choices[r] as RallyChoice, rng, this.strikerPosition);
+        ? resolveServeExchange(s, skills, this.choices[s] as ServerChoice, this.choices[r] as ReceiverChoice, rng, this.energy)
+        : resolveRallyExchange(s, skills, this.choices[s] as RallyChoice, this.choices[r] as RallyChoice, rng, this.strikerPosition, this.energy);
 
     this.choices = [null, null];
     this.exchangeCount++;
     const exchangeNumber = this.exchangeCount;
     this.recordDuelStats(exchange);
+    for (const duel of exchange.duels) this.energy = spend(this.energy, duelCost(duel));
 
     if (exchange.pointWinner === null) {
       // The server covered the last shot, so their read sets up their next attack.
@@ -139,6 +143,10 @@ export class Match {
     const winner = exchange.pointWinner;
     this.recordPointStats(exchange, winner, s);
     const event = this.score.pointWon(winner);
+    this.energy = regain(this.energy, POINT_RECOVERY);
+    // Players change ends, and rest, after every odd game of a set.
+    const gamesPlayed = this.score.games[0] + this.score.games[1];
+    if ((event === 'game' && gamesPlayed % 2 === 1) || event === 'set') this.energy = regain(this.energy, CHANGEOVER_RECOVERY);
     this.phase = 'serve';
     this.exchangeCount = 0;
     this.strikerPosition = 0;
