@@ -684,7 +684,10 @@ export class App {
   }
 
   private newTournament(): void {
-    this.tournament = createTournament(Math.random, loadPlayerSkill());
+    // A tournament finished before skill was saved separately still holds the player's skill.
+    const carried = Math.max(loadPlayerSkill(), this.tournament?.entrants[HUMAN].skill ?? TOURNAMENT_START_SKILL);
+    savePlayerSkill(carried);
+    this.tournament = createTournament(Math.random, carried);
     saveTournament(this.tournament);
   }
 
