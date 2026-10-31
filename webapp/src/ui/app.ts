@@ -406,12 +406,19 @@ export class App {
     });
   }
 
+  private shotWhat(d: Duel): string {
+    if (d.kind === 'serve') return 'serve';
+    if (d.shotCalc.position > 0) return 'in position';
+    if (d.shotCalc.position < 0) return 'stretched';
+    return 'shot';
+  }
+
   private calcRow(who: PlayerIndex, what: string, c: Calculation): string {
     return `
       <div class="calc">
         <span class="player-chip p${who}">${escapeHtml(this.names[who])}</span>
         <span class="calc-what">${what}</span>
-        <span class="calc-math">${c.skill.toFixed(2)} <i>${fmt(c.modifier)}</i> <i class="luck">${fmt(c.random)}</i> = <b>${c.total.toFixed(2)}</b></span>
+        <span class="calc-math">${c.skill.toFixed(2)} <i>${fmt(c.modifier)}</i>${c.position === 0 ? '' : ` <i class="position ${c.position > 0 ? 'good' : 'bad'}">${fmt(c.position)}</i>`} <i class="luck">${fmt(c.random)}</i> = <b>${c.total.toFixed(2)}</b></span>
       </div>`;
   }
 
@@ -432,7 +439,7 @@ export class App {
     panel.innerHTML = `
       <div class="panel-head">
         <span class="role ${winner === null ? '' : winner === 0 ? 'good' : 'bad'}">${escapeHtml(headline)}</span>
-        <span class="context">skill <i>shot/read</i> <i class="luck">luck</i></span>
+        <span class="context">skill <i>shot/read</i> <i class="position good">position</i> <i class="luck">luck</i></span>
       </div>
       <div class="duels">
         ${ex.duels
@@ -440,7 +447,7 @@ export class App {
             (d) => `
           <div class="duel ${d.hitterWins ? 'hit' : 'held'}">
             <div class="duel-title"><span>${verb[d.kind]} · ${escapeHtml(shotLabel(d))}</span><b>${this.duelResult(d)}</b></div>
-            ${this.calcRow(d.hitter, `${d.kind === 'serve' ? 'serve' : 'shot'}`, d.shotCalc)}
+            ${this.calcRow(d.hitter, this.shotWhat(d), d.shotCalc)}
             ${this.calcRow(d.defender, `read ${escapeHtml(readLabel(d))}`, d.readCalc)}
           </div>`,
           )
@@ -576,10 +583,14 @@ export class App {
       (<span class="swatch target"></span> target) and where to cover the opponent's next ball
       (<span class="swatch read"></span> read). Then both are revealed and resolved.</p>
       <h3>Resolution</h3>
-      <p><b>Shot</b> = skill + shot risk + luck<br/><b>Read</b> = skill + read bonus/penalty + luck<br/>
+      <p><b>Shot</b> = skill + shot risk + position + luck<br/><b>Read</b> = skill + read bonus/penalty + luck<br/>
       Luck is a random roll between −0.3 and +0.3. If the shot beats the read, the hitter wins the point.
       Otherwise the ball comes back, and the defender's own shot is tested against the hitter's read.
       If both shots are covered, the rally continues with a new set of choices.</p>
+      <h3>Position</h3>
+      <p>Your read also sets up your next shot. A third of your read bonus or penalty carries into the next ball you hit:
+      a correct read puts you <b>in position</b> (+0.1, or +0.2 after reading a drop shot), and a lucky cover after
+      a wrong read leaves you <b>stretched</b> (down to −0.2). Serves always start from a neutral position.</p>
       <h3>Serve vs. read</h3>
       <p class="small">Rows: serve (risk). Columns: receiver's read.</p>
       ${serveTable}

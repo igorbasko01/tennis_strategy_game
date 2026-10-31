@@ -20,19 +20,32 @@ export const RANDOM_RANGE = 0.3;
 
 export const rollRandomFactor = (rng: Rng): number => (rng() * 2 - 1) * RANDOM_RANGE;
 
-/** skill + modifier + random, kept separate so the UI can show the breakdown. */
+/**
+ * Share of a player's read modifier that carries into the next shot they hit:
+ * a good read puts them in position, a bad one leaves them stretched.
+ */
+export const POSITION_FACTOR = 1 / 3;
+
+/** Position bonus/penalty for the shot that follows a read with this modifier. */
+export const positionFromRead = (readModifier: number): number =>
+  Math.round(readModifier * POSITION_FACTOR * 100) / 100;
+
+/** skill + modifier + position + random, kept separate so the UI can show the breakdown. */
 export interface Calculation {
   skill: number;
   modifier: number;
+  /** Carry-over from the hitter's previous read; always 0 for reads. */
+  position: number;
   random: number;
   total: number;
 }
 
-export const calculate = (skill: number, modifier: number, random: number): Calculation => ({
+export const calculate = (skill: number, modifier: number, random: number, position = 0): Calculation => ({
   skill,
   modifier,
+  position,
   random,
-  total: skill + modifier + random,
+  total: skill + modifier + position + random,
 });
 
 /** The server's bundled decision: serve target + where to recover for the return. */
@@ -92,8 +105,9 @@ export const resolveDuel = (
   read: ServeReceiveAction | DefendAction,
   readModifier: number,
   rng: Rng,
+  hitterPosition = 0,
 ): Duel => {
-  const shotCalc = calculate(hitterSkill, shotCost, rollRandomFactor(rng));
+  const shotCalc = calculate(hitterSkill, shotCost, rollRandomFactor(rng), hitterPosition);
   const readCalc = calculate(defenderSkill, readModifier, rollRandomFactor(rng));
   return {
     kind,
@@ -139,17 +153,22 @@ export const resolveServeExchange = (
     serverChoice.anticipation,
     DEFEND_MODIFIER[receiverChoice.returnTarget][serverChoice.anticipation],
     rng,
+    positionFromRead(serve.readCalc.modifier),
   );
   return { phase: 'serve', duels: [serve, ret], pointWinner: ret.hitterWins ? receiver : null };
 };
 
-/** A rally exchange: the striker attacks, and if covered the defender counters. */
+/**
+ * A rally exchange: the striker attacks, and if covered the defender counters.
+ * `strikerPosition` carries over from the striker's read in the previous exchange.
+ */
 export const resolveRallyExchange = (
   striker: PlayerIndex,
   skills: readonly [number, number],
   strikerChoice: RallyChoice,
   defenderChoice: RallyChoice,
   rng: Rng,
+  strikerPosition = 0,
 ): Exchange => {
   const defender = other(striker);
   const attack = resolveDuel(
@@ -162,6 +181,7 @@ export const resolveRallyExchange = (
     defenderChoice.anticipation,
     DEFEND_MODIFIER[strikerChoice.attack][defenderChoice.anticipation],
     rng,
+    strikerPosition,
   );
   if (attack.hitterWins) return { phase: 'rally', duels: [attack], pointWinner: striker };
 
@@ -175,6 +195,7 @@ export const resolveRallyExchange = (
     strikerChoice.anticipation,
     DEFEND_MODIFIER[defenderChoice.attack][strikerChoice.anticipation],
     rng,
+    positionFromRead(attack.readCalc.modifier),
   );
   return { phase: 'rally', duels: [attack, counter], pointWinner: counter.hitterWins ? defender : null };
 };

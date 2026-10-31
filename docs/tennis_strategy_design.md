@@ -46,6 +46,18 @@ When checking if a shot was successful it should take into account both the serv
 The server should apply its skill \+ shot difficulty \+ random factor.  
 The receiver (during defence) should apply its skill \+ anticipation bonus/penalty \+ random factor.
 
+### Position Carry-over
+
+A read also sets up the defender's next shot. One third of the read modifier (rounded to 0.01) is added to the next shot that player hits:
+
+1. Correct read (+0.3): next shot \+0.1. Correct drop shot read (+0.6): next shot \+0.2.
+2. Slight miss (-0.3 / -0.1): next shot \-0.1 / \-0.03.
+3. Wrong side (-0.6): next shot \-0.2.
+
+This applies to the return (from the serve read), the counter-attack (from the rally read), and the server's first attack of the next rally exchange (from their read of the previous counter or return). Serves have no position modifier.
+
+Shot total: skill \+ action cost \+ position \+ random factor.
+
 ### Actions Cost:
 
 1. Serve Actions:  

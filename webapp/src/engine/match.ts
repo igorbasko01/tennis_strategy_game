@@ -1,5 +1,6 @@
 import {
   other,
+  positionFromRead,
   resolveRallyExchange,
   resolveServeExchange,
   type Choice,
@@ -62,6 +63,8 @@ export class Match {
   phase: 'serve' | 'rally' = 'serve';
   /** Exchanges completed in the current point. */
   exchangeCount = 0;
+  /** Position carry-over for the server's first shot of the next rally exchange. */
+  private strikerPosition = 0;
   private choices: [Choice | null, Choice | null] = [null, null];
 
   constructor(players: readonly [PlayerConfig, PlayerConfig], scoring: ScoringConfig, firstServer: PlayerIndex = 0) {
@@ -118,7 +121,7 @@ export class Match {
     const exchange =
       this.phase === 'serve'
         ? resolveServeExchange(s, skills, this.choices[s] as ServerChoice, this.choices[r] as ReceiverChoice, rng)
-        : resolveRallyExchange(s, skills, this.choices[s] as RallyChoice, this.choices[r] as RallyChoice, rng);
+        : resolveRallyExchange(s, skills, this.choices[s] as RallyChoice, this.choices[r] as RallyChoice, rng, this.strikerPosition);
 
     this.choices = [null, null];
     this.exchangeCount++;
@@ -126,6 +129,9 @@ export class Match {
     this.recordDuelStats(exchange);
 
     if (exchange.pointWinner === null) {
+      // The server covered the last shot, so their read sets up their next attack.
+      const last = exchange.duels[exchange.duels.length - 1];
+      this.strikerPosition = positionFromRead(last.readCalc.modifier);
       this.phase = 'rally';
       return { exchange, event: null, exchangeNumber };
     }
@@ -135,6 +141,7 @@ export class Match {
     const event = this.score.pointWon(winner);
     this.phase = 'serve';
     this.exchangeCount = 0;
+    this.strikerPosition = 0;
     return { exchange, event, exchangeNumber };
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   RANDOM_RANGE,
   calculate,
+  positionFromRead,
   resolveRallyExchange,
   resolveServeExchange,
   rollRandomFactor,
@@ -110,5 +111,46 @@ describe('rally exchange', () => {
     );
     expect(ex.pointWinner).toBe(1);
     expect(ex.duels).toHaveLength(1);
+  });
+});
+
+describe('position carry-over', () => {
+  it('turns a third of the read modifier into the next shot’s position', () => {
+    expect(positionFromRead(0.3)).toBeCloseTo(0.1);
+    expect(positionFromRead(0.6)).toBeCloseTo(0.2);
+    expect(positionFromRead(-0.1)).toBeCloseTo(-0.03);
+    expect(positionFromRead(-0.6)).toBeCloseTo(-0.2);
+  });
+
+  it('serves have no position; a correct serve read helps the return', () => {
+    const ex = resolveServeExchange(0, skills, server('wide', 'centerDeep'), receiver('wide', 'centerDeep'), neutral);
+    expect(ex.duels[0].shotCalc.position).toBe(0);
+    expect(ex.duels[1].shotCalc.position).toBeCloseTo(0.1);
+    expect(ex.duels[1].shotCalc.total).toBeCloseTo(0.5 - 0.1 + 0.1);
+  });
+
+  it('a lucky cover after a wrong read leaves the returner stretched', () => {
+    // Serve 0.5 - 0.3 - 0.3 = -0.1 vs read 0.5 - 0.6 + 0 = -0.1: tie, so returned.
+    const ex = resolveServeExchange(0, skills, server('wide'), receiver('tLine'), seq(0, 0.5));
+    expect(ex.duels[0].hitterWins).toBe(false);
+    expect(ex.duels[1].shotCalc.position).toBeCloseTo(-0.2);
+  });
+
+  it('a correct read in a rally helps the counter, and the striker carries theirs in', () => {
+    const ex = resolveRallyExchange(
+      0,
+      skills,
+      { kind: 'rally', attack: 'dropShot', anticipation: 'centerDeep' },
+      { kind: 'rally', attack: 'centerDeep', anticipation: 'dropShot' },
+      neutral,
+      0.1,
+    );
+    expect(ex.duels[0].shotCalc.position).toBeCloseTo(0.1);
+    expect(ex.duels[1].shotCalc.position).toBeCloseTo(0.2);
+  });
+
+  it('reads never carry a position term', () => {
+    const ex = resolveServeExchange(0, skills, server('body'), receiver('neutral'), neutral);
+    for (const d of ex.duels) expect(d.readCalc.position).toBe(0);
   });
 });

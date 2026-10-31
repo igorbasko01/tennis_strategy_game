@@ -47,6 +47,25 @@ describe('Match', () => {
     expect(m.stats[0].longestRally).toBe(3);
   });
 
+  it('carries the server’s last read into their next rally attack, and resets each point', () => {
+    const m = new Match(players, { setsToWin: 1, gamesPerSet: 6 });
+    // Server reads the return correctly (+0.3), so their first rally shot starts at +0.1.
+    m.submit(0, { kind: 'server', serveTarget: 'body', anticipation: 'centerDeep' });
+    m.submit(1, { kind: 'receiver', anticipation: 'neutral', returnTarget: 'centerDeep' });
+    m.resolve(neutral);
+    m.submit(0, { kind: 'rally', attack: 'downTheLine', anticipation: 'crossCourt' });
+    m.submit(1, { kind: 'rally', attack: 'crossCourt', anticipation: 'crossCourt' });
+    const rally = m.resolve(neutral);
+    expect(rally.exchange.duels[0].shotCalc.position).toBeCloseTo(0.1);
+    expect(rally.exchange.pointWinner).toBe(0);
+
+    // New point: the serve starts from a neutral position again.
+    m.submit(0, { kind: 'server', serveTarget: 'body', anticipation: 'centerDeep' });
+    m.submit(1, { kind: 'receiver', anticipation: 'neutral', returnTarget: 'centerDeep' });
+    const next = m.resolve(neutral);
+    expect(next.exchange.duels[0].shotCalc.position).toBe(0);
+  });
+
   it('counts aces and reads', () => {
     const m = new Match(players, { setsToWin: 1, gamesPerSet: 6 });
     m.submit(0, { kind: 'server', serveTarget: 'wide', anticipation: 'crossCourt' });
