@@ -8,6 +8,7 @@ import {
   type ServeAction,
   type ServeReceiveAction,
 } from './actions';
+import { fatiguePenalty, recoveryBonus } from './energy';
 
 export type PlayerIndex = 0 | 1;
 export const other = (p: PlayerIndex): PlayerIndex => (p === 0 ? 1 : 0);
@@ -30,23 +31,29 @@ export const POSITION_FACTOR = 1 / 3;
 export const positionFromRead = (readModifier: number): number =>
   Math.round(readModifier * POSITION_FACTOR * 100) / 100;
 
-/** skill + modifier + position + random, kept separate so the UI can show the breakdown. */
+/** skill + modifier + position + energy + random, kept separate so the UI can show the breakdown. */
 export interface Calculation {
   skill: number;
   modifier: number;
   /** Carry-over from the hitter's previous read; always 0 for reads. */
   position: number;
+  /** Fatigue penalty, plus (for reads) recovery from a wrong read while fresh. */
+  energy: number;
   random: number;
   total: number;
 }
 
-export const calculate = (skill: number, modifier: number, random: number, position = 0): Calculation => ({
+export const calculate = (skill: number, modifier: number, random: number, position = 0, energy = 0): Calculation => ({
   skill,
   modifier,
   position,
+  energy,
   random,
-  total: skill + modifier + position + random,
+  total: skill + modifier + position + energy + random,
 });
+
+/** Each player's energy (0-1) going into an exchange; omit to resolve without energy effects. */
+export type Energies = readonly [number, number];
 
 /** The server's bundled decision: serve target + where to recover for the return. */
 export interface ServerChoice {
@@ -106,9 +113,13 @@ export const resolveDuel = (
   readModifier: number,
   rng: Rng,
   hitterPosition = 0,
+  energy?: Energies,
 ): Duel => {
-  const shotCalc = calculate(hitterSkill, shotCost, rollRandomFactor(rng), hitterPosition);
-  const readCalc = calculate(defenderSkill, readModifier, rollRandomFactor(rng));
+  const defender = other(hitter);
+  const shotEnergy = energy ? fatiguePenalty(energy[hitter]) : 0;
+  const readEnergy = energy ? fatiguePenalty(energy[defender]) + recoveryBonus(readModifier, energy[defender]) : 0;
+  const shotCalc = calculate(hitterSkill, shotCost, rollRandomFactor(rng), hitterPosition, shotEnergy);
+  const readCalc = calculate(defenderSkill, readModifier, rollRandomFactor(rng), 0, readEnergy);
   return {
     kind,
     hitter,
@@ -128,6 +139,7 @@ export const resolveServeExchange = (
   serverChoice: ServerChoice,
   receiverChoice: ReceiverChoice,
   rng: Rng,
+  energy?: Energies,
 ): Exchange => {
   const receiver = other(server);
   const serve = resolveDuel(
@@ -140,6 +152,8 @@ export const resolveServeExchange = (
     receiverChoice.anticipation,
     SERVE_RECEIVE_MODIFIER[serverChoice.serveTarget][receiverChoice.anticipation],
     rng,
+    0,
+    energy,
   );
   if (serve.hitterWins) return { phase: 'serve', duels: [serve], pointWinner: server };
 
@@ -154,6 +168,7 @@ export const resolveServeExchange = (
     DEFEND_MODIFIER[receiverChoice.returnTarget][serverChoice.anticipation],
     rng,
     positionFromRead(serve.readCalc.modifier),
+    energy,
   );
   return { phase: 'serve', duels: [serve, ret], pointWinner: ret.hitterWins ? receiver : null };
 };
@@ -169,6 +184,7 @@ export const resolveRallyExchange = (
   defenderChoice: RallyChoice,
   rng: Rng,
   strikerPosition = 0,
+  energy?: Energies,
 ): Exchange => {
   const defender = other(striker);
   const attack = resolveDuel(
@@ -182,6 +198,7 @@ export const resolveRallyExchange = (
     DEFEND_MODIFIER[strikerChoice.attack][defenderChoice.anticipation],
     rng,
     strikerPosition,
+    energy,
   );
   if (attack.hitterWins) return { phase: 'rally', duels: [attack], pointWinner: striker };
 
@@ -196,6 +213,7 @@ export const resolveRallyExchange = (
     DEFEND_MODIFIER[defenderChoice.attack][strikerChoice.anticipation],
     rng,
     positionFromRead(attack.readCalc.modifier),
+    energy,
   );
   return { phase: 'rally', duels: [attack, counter], pointWinner: counter.hitterWins ? defender : null };
 };

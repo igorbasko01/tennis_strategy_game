@@ -68,8 +68,9 @@ describe('Match', () => {
 
   it('counts aces and reads', () => {
     const m = new Match(players, { setsToWin: 1, gamesPerSet: 6 });
-    m.submit(0, { kind: 'server', serveTarget: 'wide', anticipation: 'crossCourt' });
-    m.submit(1, { kind: 'receiver', anticipation: 'tLine', returnTarget: 'crossCourt' });
+    // Body 0.4 vs a misread Wide 0.5 - 0.3 + 0.15 recovery = 0.35.
+    m.submit(0, { kind: 'server', serveTarget: 'body', anticipation: 'crossCourt' });
+    m.submit(1, { kind: 'receiver', anticipation: 'wide', returnTarget: 'crossCourt' });
     m.resolve(neutral);
     expect(m.stats[0].aces).toBe(1);
     expect(m.stats[1].readsMade).toBe(1);

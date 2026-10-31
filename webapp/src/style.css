@@ -11,6 +11,7 @@
   --lime-ink: #2d4a10;
   --target: #ffc93c;
   --read: #59d8ff;
+  --energy: #d3a6ff;
   --p0: #e9f5c8;
   --p1: #ff7a59;
   --good: #9be15d;
@@ -371,6 +372,39 @@ button:focus-visible {
 
 .calc-math i.position.bad {
   color: var(--bad);
+}
+
+.context i.energy,
+.calc-math i.energy {
+  color: var(--energy);
+}
+
+.energy-bar {
+  flex: none;
+  width: 40px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.energy-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.energy-bar.high i {
+  background: var(--good);
+}
+
+.energy-bar.mid i {
+  background: var(--target);
+}
+
+.energy-bar.low i {
+  background: var(--bad);
 }
 
 .group {
