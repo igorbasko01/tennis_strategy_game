@@ -112,7 +112,7 @@ describe('tournament', () => {
     const { winner, sets } = simulateMatch([0.3, 0.3], seeded(11));
     expect([0, 1]).toContain(winner);
     expect(sets).toHaveLength(1);
-    expect(Math.max(...sets[0])).toBeGreaterThanOrEqual(4);
+    expect(Math.max(...sets[0])).toBe(2);
   });
 
   it('survives a JSON round trip and rejects junk', () => {

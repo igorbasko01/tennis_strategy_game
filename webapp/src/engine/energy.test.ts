@@ -3,6 +3,7 @@ import { AiOpponent } from './ai';
 import { CHANGEOVER_RECOVERY, MAX_FATIGUE, POINT_RECOVERY, duelCost, fatiguePenalty, recoveryBonus } from './energy';
 import { Match } from './match';
 import { resolveServeExchange, type Duel } from './resolution';
+import { MATCH_SCORING } from './scoring';
 
 const neutral = () => 0.5;
 const seeded = (seed: number) => () => {
@@ -98,12 +99,12 @@ describe('energy in a match', () => {
     }
   });
 
-  it('leaves average players at roughly half energy after a one-set match', () => {
+  it('leaves average players at roughly half energy after a match', () => {
     const rng = seeded(42);
     let total = 0;
     const N = 60;
     for (let i = 0; i < N; i++) {
-      const m = new Match(players, { setsToWin: 1, gamesPerSet: 4 });
+      const m = new Match(players, MATCH_SCORING);
       const ai = new AiOpponent(rng);
       while (!m.isOver) {
         m.submit(0, ai.choose(m, 0));
@@ -114,6 +115,6 @@ describe('energy in a match', () => {
     }
     const avg = total / N;
     expect(avg).toBeGreaterThan(0.35);
-    expect(avg).toBeLessThan(0.75);
+    expect(avg).toBeLessThan(0.65);
   });
 });

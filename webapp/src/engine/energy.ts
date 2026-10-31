@@ -11,20 +11,20 @@ export const MAX_RECOVERY_SHARE = 0.5;
 
 /** Energy a defender spends reaching each kind of ball, before any misread. */
 const DEFEND_COST: Record<string, number> = {
-  wide: 0.012,
-  body: 0.006,
-  tLine: 0.012,
-  crossCourt: 0.012,
-  downTheLine: 0.012,
-  centerDeep: 0.008,
-  dropShot: 0.02,
+  wide: 0.018,
+  body: 0.009,
+  tLine: 0.018,
+  crossCourt: 0.018,
+  downTheLine: 0.018,
+  centerDeep: 0.012,
+  dropShot: 0.03,
 };
 
 /** Extra energy per 0.1 of misread penalty: changing direction late is tiring. */
-const MISREAD_COST_PER_TENTH = 0.004;
+const MISREAD_COST_PER_TENTH = 0.006;
 
 /** Energy a hitter spends on the shot and on recovering afterwards. */
-const HIT_COST = 0.004;
+const HIT_COST = 0.006;
 
 /** Energy regained after every point, and extra at each changeover. */
 export const POINT_RECOVERY = 0.02;
