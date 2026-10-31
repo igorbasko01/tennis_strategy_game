@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Score } from './scoring';
+import { MATCH_SCORING, Score } from './scoring';
 import type { PlayerIndex } from './resolution';
 
 const win = (s: Score, p: PlayerIndex, n: number) => {
@@ -85,6 +85,23 @@ describe('Score', () => {
     expect(s.winner).toBeNull();
     expect(win(s, 1, 16)).toBe('match');
     expect(s.winner).toBe(1);
+  });
+
+  it('plays matches as the best of three games', () => {
+    const straight = new Score(MATCH_SCORING);
+    win(straight, 0, 4);
+    expect(straight.winner).toBeNull();
+    expect(win(straight, 0, 4)).toBe('match');
+    expect(straight.completedSets).toEqual([[2, 0]]);
+
+    const decider = new Score(MATCH_SCORING);
+    win(decider, 0, 4);
+    win(decider, 1, 4);
+    expect(decider.games).toEqual([1, 1]);
+    expect(decider.tiebreak).toBe(false);
+    expect(win(decider, 1, 4)).toBe('match');
+    expect(decider.winner).toBe(1);
+    expect(decider.completedSets).toEqual([[1, 2]]);
   });
 
   it('rejects points after the match ends', () => {

@@ -1,14 +1,13 @@
 import { AiOpponent } from './ai';
 import { Match } from './match';
 import type { Rng } from './resolution';
-import type { ScoringConfig } from './scoring';
+import { MATCH_SCORING, type ScoringConfig } from './scoring';
 
 /** Starting skill for CPU entrants, and for a human with no saved skill yet. */
 export const TOURNAMENT_START_SKILL = 0.3;
 export const MAX_SKILL = 1;
 /** Each round a player wins adds a random gain of 0.00-0.05, in 0.01 steps. */
 export const TOURNAMENT_MAX_GAIN = 0.05;
-export const TOURNAMENT_SCORING: ScoringConfig = { setsToWin: 1, gamesPerSet: 4 };
 export const ROUND_NAMES = ['Quarterfinal', 'Semifinal', 'Final'] as const;
 export const HUMAN = 0;
 
@@ -89,7 +88,7 @@ export const currentOpponent = (t: Tournament): number | null => {
 };
 
 /** Plays a whole CPU-vs-CPU match and returns the winner's side and the set score. */
-export const simulateMatch = (skills: readonly [number, number], rng: Rng, scoring: ScoringConfig = TOURNAMENT_SCORING) => {
+export const simulateMatch = (skills: readonly [number, number], rng: Rng, scoring: ScoringConfig = MATCH_SCORING) => {
   const m = new Match(
     [
       { name: 'A', skill: skills[0] },

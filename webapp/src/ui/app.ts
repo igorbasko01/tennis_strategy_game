@@ -16,7 +16,7 @@ import {
 import { AiOpponent } from '../engine/ai';
 import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
-import type { ScoringConfig } from '../engine/scoring';
+import { MATCH_SCORING, type ScoringConfig } from '../engine/scoring';
 import {
   emptyProfile,
   outcomeLabel,
@@ -31,7 +31,6 @@ import {
   MAX_SKILL,
   ROUND_NAMES,
   TOURNAMENT_START_SKILL,
-  TOURNAMENT_SCORING,
   createTournament,
   currentOpponent,
   currentRound,
@@ -44,23 +43,16 @@ import type { DecisionKind } from '../scene/layout';
 import { CourtScene } from '../scene/scene';
 import { Sound } from './sound';
 
-type Length = 'quick' | 'standard' | 'full';
 
 interface Settings {
   playerSkill: SkillTierId;
   cpuSkill: SkillTierId;
-  length: Length;
   muted: boolean;
 }
 
-const LENGTHS: Record<Length, ScoringConfig> = {
-  quick: { setsToWin: 1, gamesPerSet: 4 },
-  standard: { setsToWin: 1, gamesPerSet: 6 },
-  full: { setsToWin: 2, gamesPerSet: 6 },
-};
 
 const SETTINGS_KEY = 'tennis-strategy-settings';
-const DEFAULT_SETTINGS: Settings = { playerSkill: 'pro', cpuSkill: 'pro', length: 'quick', muted: false };
+const DEFAULT_SETTINGS: Settings = { playerSkill: 'pro', cpuSkill: 'pro', muted: false };
 
 const loadSettings = (): Settings => {
   try {
@@ -71,7 +63,6 @@ const loadSettings = (): Settings => {
       // Older saves may hold values from settings that no longer exist.
       if (!skillTier(merged.playerSkill)) merged.playerSkill = DEFAULT_SETTINGS.playerSkill;
       if (!skillTier(merged.cpuSkill)) merged.cpuSkill = DEFAULT_SETTINGS.cpuSkill;
-      if (!(merged.length in LENGTHS)) merged.length = DEFAULT_SETTINGS.length;
       return merged;
     }
   } catch {
@@ -274,7 +265,7 @@ export class App {
     practice.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.segmented button');
       if (!b) return;
-      const key = (b.parentElement as HTMLElement).dataset.setting as 'playerSkill' | 'cpuSkill' | 'length';
+      const key = (b.parentElement as HTMLElement).dataset.setting as 'playerSkill' | 'cpuSkill';
       (this.settings as unknown as Record<string, string>)[key] = b.dataset.value!;
       saveSettings(this.settings);
       sync();
@@ -305,7 +296,7 @@ export class App {
     return {
       names: ['You', 'CPU'],
       skills: [skillTier(this.settings.playerSkill)!.skill, skillTier(this.settings.cpuSkill)!.skill],
-      scoring: LENGTHS[this.settings.length],
+      scoring: MATCH_SCORING,
       tournament: false,
     };
   }
@@ -780,7 +771,7 @@ export class App {
     return {
       names: ['You', opp.name],
       skills: [t.entrants[HUMAN].skill, opp.skill],
-      scoring: TOURNAMENT_SCORING,
+      scoring: MATCH_SCORING,
       tournament: true,
     };
   }

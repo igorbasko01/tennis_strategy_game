@@ -10,9 +10,10 @@ first (portrait and landscape), with tablets and desktops also supported.
 - Serve phase (Wide / Body / T-Line vs. Wide / Neutral / T-Line reads) and rally phase (Cross-Court / Down the Line / Center Deep / Drop Shot).
 - Resolution that follows the design: `skill + action modifier + random(-0.3..0.3)`, shown in a per-shot breakdown.
 - Energy: running drains it and it recovers between points and at changeovers. Fresh players can scramble back from a wrong read; tired ones lose up to 0.15 on every shot and read.
-- Full tennis scoring: deuce/advantage, games, sets, tiebreaks, and serve rotation.
-- **Practice match:** pick your skill and the CPU's from five tiers (Beginner 0.3, Club 0.4, Pro 0.5, Elite 0.6, Legend 0.7) and a match length.
-- **Tournament:** an 8-player knockout (quarterfinal, semifinal, final), each match one set to 4 games. CPU opponents start at skill 0.30 and every round won adds a random 0.00–0.05. Your skill is saved and carries over, so each new tournament starts from what you have built up. Progress is saved in the browser between matches. Tournaments are numbered (#1, #2, …).
+- Every match is the best of three games: the first to win two games wins.
+- Tennis scoring within each game (15/30/40, deuce and advantage), with the serve alternating every game.
+- **Practice match:** pick your skill and the CPU's from five tiers (Beginner 0.3, Club 0.4, Pro 0.5, Elite 0.6, Legend 0.7).
+- **Tournament:** an 8-player knockout (quarterfinal, semifinal, final), each match the best of three games. CPU opponents start at skill 0.30 and every round won adds a random 0.00–0.05. Your skill is saved and carries over, so each new tournament starts from what you have built up. Progress is saved in the browser between matches. Tournaments are numbered (#1, #2, …).
 - **Profile:** your skill, tournaments played, titles and match record, plus every tournament with its result and each match you played in it. **Settings → Start fresh** wipes skill and history.
 - The CPU currently picks every decision at random; smarter behaviour will come later.
 - 3D court with animated players and ball. You can tap the zones on the court as well as the buttons.

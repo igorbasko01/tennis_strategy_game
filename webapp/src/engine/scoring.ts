@@ -5,7 +5,12 @@ export interface ScoringConfig {
   setsToWin: number;
   /** Games needed to win a set; a tiebreak is played at gamesPerSet-all. */
   gamesPerSet: number;
+  /** Required game lead to take a set (default 2, as in tennis; 1 means first to gamesPerSet). */
+  gamesWinBy?: number;
 }
+
+/** Every match is the best of three games: the first player to win two games wins. */
+export const MATCH_SCORING: ScoringConfig = { setsToWin: 1, gamesPerSet: 2, gamesWinBy: 1 };
 
 export type PointEvent = 'point' | 'game' | 'set' | 'match';
 
@@ -62,7 +67,8 @@ export class Score {
 
     const o = other(p);
     const g = this.config.gamesPerSet;
-    const setOver = wasTiebreak || (this.games[p] >= g && this.games[p] - this.games[o] >= 2);
+    const winBy = this.config.gamesWinBy ?? 2;
+    const setOver = wasTiebreak || (this.games[p] >= g && this.games[p] - this.games[o] >= winBy);
     if (!setOver) {
       if (this.games[0] === g && this.games[1] === g) this.tiebreak = true;
       return 'game';
