@@ -219,6 +219,7 @@ export class App {
     const menu = $('#menu');
     const practice = $('#practice');
     menu.querySelector('[data-act="practice"]')!.addEventListener('click', () => this.showScreen('practice'));
+    menu.querySelector('[data-act="settings"]')!.addEventListener('click', () => this.renderSettings());
     menu.querySelector('[data-act="tournament"]')!.addEventListener('click', () => {
       this.sound.unlock();
       if (!this.tournament) this.newTournament();
@@ -266,8 +267,8 @@ export class App {
   }
 
   /** Shows one full-screen overlay (or none, to reveal the match). */
-  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'over' | null): void {
-    for (const id of ['menu', 'practice', 'tournament', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
+  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'settings' | 'over' | null): void {
+    for (const id of ['menu', 'practice', 'tournament', 'settings', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
     $('#resume').classList.toggle('hidden', !(this.match && !this.match.isOver));
   }
 
@@ -650,6 +651,37 @@ export class App {
   }
 
   // ---------------------------------------------------------------- tournament
+
+  private renderSettings(): void {
+    const el = $('#settings');
+    const skill = loadPlayerSkill();
+    const atStart = skill <= TOURNAMENT_START_SKILL;
+    el.innerHTML = `
+      <div class="menu-card">
+        <h2>Settings</h2>
+        <div class="next-match">
+          <div><span class="setting-label">Tournament skill</span><b>${skill.toFixed(2)}</b></div>
+        </div>
+        <button class="primary big" data-act="reset" ${atStart ? 'disabled' : ''}>Reset skill to ${TOURNAMENT_START_SKILL.toFixed(2)}</button>
+        <button class="ghost" data-act="back">Back</button>
+      </div>`;
+    this.showScreen('settings');
+    el.querySelector('[data-act="reset"]')!.addEventListener('click', () => {
+      const inProgress = this.tournament?.status === 'playing';
+      const message = `Reset your skill to ${TOURNAMENT_START_SKILL.toFixed(2)}?${inProgress ? ' Your tournament in progress will also end.' : ''}`;
+      if (!window.confirm(message)) return;
+      savePlayerSkill(TOURNAMENT_START_SKILL);
+      // Drop the current tournament too, or finishing it would save the old skill again.
+      this.tournament = null;
+      saveTournament(null);
+      if (this.setup?.tournament) {
+        this.generation++;
+        this.match = null;
+      }
+      this.renderSettings();
+    });
+    el.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
+  }
 
   private newTournament(): void {
     this.tournament = createTournament(Math.random, loadPlayerSkill());
