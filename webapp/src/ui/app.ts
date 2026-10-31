@@ -18,7 +18,8 @@ import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
 import type { ScoringConfig } from '../engine/scoring';
 import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
-import { CourtScene, type ZoneMarker } from '../scene/scene';
+import type { DecisionKind } from '../scene/layout';
+import { CourtScene } from '../scene/scene';
 import { Sound } from './sound';
 
 type Length = 'quick' | 'standard' | 'full';
@@ -261,34 +262,28 @@ export class App {
 
     let heading: string;
     let groups: GroupDef[];
-    let markers: ZoneMarker[];
+    let markerKind: DecisionKind;
     if (kind === 'server') {
       heading = 'Your serve';
       groups = [
         { key: 'target', title: 'Serve target', options: serveTargetOptions() },
         { key: 'read', title: `Cover ${opp}'s return`, options: defendReadOptions() },
       ];
-      markers = [
-        ...this.scene.targetMarkersFor(p, 'serve', SERVE_LABEL),
-        ...this.scene.readMarkersFor(p, 'attack', ATTACK_LABEL),
-      ];
+      markerKind = 'server';
     } else if (kind === 'receiver') {
       heading = `Returning ${opp}'s serve`;
       groups = [
         { key: 'read', title: 'Read the serve', options: serveReadOptions() },
         { key: 'target', title: 'Return target', options: attackTargetOptions() },
       ];
-      markers = [
-        ...this.scene.readMarkersFor(p, 'serve', SERVE_RECEIVE_LABEL),
-        ...this.scene.targetMarkersFor(p, 'rally', ATTACK_LABEL),
-      ];
+      markerKind = 'receiver';
     } else {
       const striking = p === match.server;
       heading = striking ? 'Your shot' : `${opp} is on the ball`;
       const target: GroupDef = { key: 'target', title: striking ? 'Attack' : 'Counter-attack', options: attackTargetOptions() };
       const read: GroupDef = { key: 'read', title: striking ? `Cover ${opp}'s reply` : `Cover ${opp}'s attack`, options: defendReadOptions() };
       groups = striking ? [target, read] : [read, target];
-      markers = [...this.scene.targetMarkersFor(p, 'rally', ATTACK_LABEL), ...this.scene.readMarkersFor(p, 'attack', ATTACK_LABEL)];
+      markerKind = striking ? 'striker' : 'defender';
     }
 
     const score = match.score;
@@ -327,7 +322,6 @@ export class App {
         .join('')}
       <button class="primary lock" disabled>Choose both</button>`;
 
-    this.scene.showMarkers(markers);
     const selected: Record<'target' | 'read', string | null> = { target: null, read: null };
     const lock = panel.querySelector<HTMLButtonElement>('.lock')!;
 
@@ -337,6 +331,8 @@ export class App {
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', String(on));
       }
+      // Each half of the decision moves the other's zones, so rebuild them on every change.
+      this.scene.showMarkers(this.scene.decisionMarkers(p, markerKind, selected));
       const ids = new Set<string>();
       if (selected.target) ids.add(`target:${selected.target}`);
       if (selected.read) ids.add(`read:${selected.read}`);
