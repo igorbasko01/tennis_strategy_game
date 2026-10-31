@@ -17,6 +17,14 @@ import { AiOpponent } from '../engine/ai';
 import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
 import type { ScoringConfig } from '../engine/scoring';
+import {
+  emptyProfile,
+  outcomeLabel,
+  parseProfile,
+  profileStats,
+  saveTournamentRecord,
+  type Profile,
+} from '../engine/profile';
 import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
 import {
   HUMAN,
@@ -119,6 +127,25 @@ const saveTournament = (t: Tournament | null) => {
   }
 };
 
+const PROFILE_KEY = 'tennis-strategy-profile';
+
+const loadProfile = (): Profile => {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    return (raw && parseProfile(JSON.parse(raw))) || emptyProfile();
+  } catch {
+    return emptyProfile();
+  }
+};
+
+const saveProfile = (p: Profile) => {
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+  } catch {
+    // ignore
+  }
+};
+
 /** Everything needed to start (or restart) a match. */
 interface MatchSetup {
   names: [string, string];
@@ -186,6 +213,7 @@ export class App {
   private names: [string, string] = ['You', 'CPU'];
   private setup: MatchSetup | null = null;
   private tournament = loadTournament();
+  private profile = loadProfile();
   /** Bumped whenever a match is abandoned so stale async flows stop. */
   private generation = 0;
   private markerTap: ((id: string) => void) | null = null;
@@ -220,6 +248,7 @@ export class App {
     const practice = $('#practice');
     menu.querySelector('[data-act="practice"]')!.addEventListener('click', () => this.showScreen('practice'));
     menu.querySelector('[data-act="settings"]')!.addEventListener('click', () => this.renderSettings());
+    menu.querySelector('[data-act="profile"]')!.addEventListener('click', () => this.renderProfile());
     menu.querySelector('[data-act="tournament"]')!.addEventListener('click', () => {
       this.sound.unlock();
       if (!this.tournament) this.newTournament();
@@ -267,8 +296,8 @@ export class App {
   }
 
   /** Shows one full-screen overlay (or none, to reveal the match). */
-  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'settings' | 'over' | null): void {
-    for (const id of ['menu', 'practice', 'tournament', 'settings', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
+  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'profile' | 'settings' | 'over' | null): void {
+    for (const id of ['menu', 'practice', 'tournament', 'profile', 'settings', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
     $('#resume').classList.toggle('hidden', !(this.match && !this.match.isOver));
   }
 
@@ -622,11 +651,11 @@ export class App {
       const t = this.tournament!;
       const roundName = ROUND_NAMES[currentRound(t)];
       const before = t.entrants[HUMAN].skill;
-      this.tournament = recordHumanMatch(t, w === 0, m.score.completedSets);
-      saveTournament(this.tournament);
+      const next = recordHumanMatch(t, w === 0, m.score.completedSets);
+      this.storeTournament(next);
       // Skill won in the tournament stays with the player for the next one.
-      savePlayerSkill(this.tournament.entrants[HUMAN].skill);
-      const gain = this.tournament.entrants[HUMAN].skill - before;
+      savePlayerSkill(next.entrants[HUMAN].skill);
+      const gain = next.entrants[HUMAN].skill - before;
       subtitle = w === 0 ? `${roundName} won · skill +${gain.toFixed(2)}` : `Knocked out in the ${roundName.toLowerCase()}`;
     }
     const el = $('#over');
@@ -661,24 +690,20 @@ export class App {
 
   private renderSettings(): void {
     const el = $('#settings');
-    const skill = loadPlayerSkill();
-    const atStart = skill <= TOURNAMENT_START_SKILL;
+    const fresh = loadPlayerSkill() <= TOURNAMENT_START_SKILL && this.profile.tournaments.length === 0 && !this.tournament;
     el.innerHTML = `
       <div class="menu-card">
         <h2>Settings</h2>
-        <div class="next-match">
-          <div><span class="setting-label">Tournament skill</span><b>${skill.toFixed(2)}</b></div>
-        </div>
-        <button class="primary big" data-act="reset" ${atStart ? 'disabled' : ''}>Reset skill to ${TOURNAMENT_START_SKILL.toFixed(2)}</button>
+        <p class="tagline">Start over with skill ${TOURNAMENT_START_SKILL.toFixed(2)}, no tournament history and tournament numbering from #1.</p>
+        <button class="primary big" data-act="reset" ${fresh ? 'disabled' : ''}>Start fresh</button>
         <button class="ghost" data-act="back">Back</button>
       </div>`;
     this.showScreen('settings');
     el.querySelector('[data-act="reset"]')!.addEventListener('click', () => {
-      const inProgress = this.tournament?.status === 'playing';
-      const message = `Reset your skill to ${TOURNAMENT_START_SKILL.toFixed(2)}?${inProgress ? ' Your tournament in progress will also end.' : ''}`;
-      if (!window.confirm(message)) return;
+      if (!window.confirm('Start fresh? Your skill, tournament in progress and tournament history will all be deleted.')) return;
       savePlayerSkill(TOURNAMENT_START_SKILL);
-      // Drop the current tournament too, or finishing it would save the old skill again.
+      this.profile = emptyProfile();
+      saveProfile(this.profile);
       this.tournament = null;
       saveTournament(null);
       if (this.setup?.tournament) {
@@ -691,8 +716,62 @@ export class App {
   }
 
   private newTournament(): void {
-    this.tournament = createTournament(Math.random, loadPlayerSkill());
-    saveTournament(this.tournament);
+    this.storeTournament(createTournament(Math.random, loadPlayerSkill(), this.profile.nextTournament));
+  }
+
+  /** Saves the tournament and its entry in the player's history. */
+  private storeTournament(t: Tournament): void {
+    this.tournament = t;
+    saveTournament(t);
+    this.profile = saveTournamentRecord(this.profile, t);
+    saveProfile(this.profile);
+  }
+
+  // ---------------------------------------------------------------- profile
+
+  private renderProfile(): void {
+    const stats = profileStats(this.profile);
+    const tile = (label: string, value: string) => `<div class="stat-tile"><span class="setting-label">${label}</span><b>${value}</b></div>`;
+    const history = [...this.profile.tournaments]
+      .reverse()
+      .map((r) => {
+        const tone = r.status === 'won' ? 'won' : r.status === 'lost' ? 'out' : 'live';
+        const matches = r.matches
+          .map(
+            (m) => `
+          <li>
+            <span class="round-name">${m.round}</span>
+            <span class="opp">${escapeHtml(m.opponent)} <small>${m.opponentSkill.toFixed(2)}</small></span>
+            <span class="result ${m.won ? 'w' : 'l'}">${m.won ? 'W' : 'L'} ${m.score}</span>
+          </li>`,
+          )
+          .join('');
+        return `
+        <section class="history-card">
+          <div class="history-head">
+            <h3>Tournament #${r.number}</h3>
+            <span class="outcome ${tone}">${r.status === 'won' ? '🏆 ' : ''}${outcomeLabel(r)}</span>
+          </div>
+          <p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}</p>
+          ${matches ? `<ul>${matches}</ul>` : '<p class="tbd">No matches played yet</p>'}
+        </section>`;
+      })
+      .join('');
+    const el = $('#profile');
+    el.innerHTML = `
+      <div class="menu-card">
+        <h2>Profile</h2>
+        <div class="stat-tiles">
+          ${tile('Skill', loadPlayerSkill().toFixed(2))}
+          ${tile('Tournaments', String(stats.tournaments))}
+          ${tile('Titles', String(stats.titles))}
+          ${tile('Matches', `${stats.matchesWon}–${stats.matchesLost}`)}
+        </div>
+        <button class="ghost" data-act="back">Back</button>
+        <div class="history">${history || '<p class="tbd">No tournaments yet. Your results will appear here.</p>'}</div>
+      </div>`;
+    this.showScreen('profile');
+    el.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
   }
 
   private tournamentSetup(): MatchSetup {
@@ -754,7 +833,7 @@ export class App {
     const el = $('#tournament');
     el.innerHTML = `
       <div class="menu-card">
-        <h2>Tournament</h2>
+        <h2>Tournament #${t.number}</h2>
         ${head}
         ${actions}
         <div class="bracket">${rounds}</div>

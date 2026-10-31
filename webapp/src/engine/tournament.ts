@@ -25,11 +25,17 @@ export interface MatchResult {
   winner: number;
   /** Final set score from the winner's side, e.g. "4–2". */
   score: string;
+  /** Both players' skills when the match was played. */
+  skills: [number, number];
 }
 
 /** Plain, JSON-serialisable tournament state. Entrant 0 is the human. */
 export interface Tournament {
-  version: 1;
+  version: 2;
+  /** Sequential tournament number for the player: 1, 2, 3, ... */
+  number: number;
+  /** The human's skill when the tournament began. */
+  startSkill: number;
   entrants: Entrant[];
   /** Entrant indices still in the draw at the start of each round played so far, in bracket order. */
   draws: number[][];
@@ -53,7 +59,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export const rollGain = (rng: Rng): number => Math.floor(rng() * (TOURNAMENT_MAX_GAIN * 100 + 1)) / 100;
 
 /** `humanSkill` is the skill the player has carried over from earlier tournaments. */
-export const createTournament = (rng: Rng = Math.random, humanSkill = TOURNAMENT_START_SKILL): Tournament => {
+export const createTournament = (rng: Rng = Math.random, humanSkill = TOURNAMENT_START_SKILL, number = 1): Tournament => {
   const names = shuffled(CPU_NAMES, rng).slice(0, 7);
   const entrants: Entrant[] = [{ name: 'You', skill: humanSkill }, ...names.map((name) => ({ name, skill: TOURNAMENT_START_SKILL }))];
   // The human's slot in the draw is random; the bracket pairs neighbours.
@@ -61,7 +67,7 @@ export const createTournament = (rng: Rng = Math.random, humanSkill = TOURNAMENT
     entrants.map((_, i) => i),
     rng,
   );
-  return { version: 1, entrants, draws: [draw], results: [], status: 'playing' };
+  return { version: 2, number, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing' };
 };
 
 /** Index of the round being played (0 = quarterfinal). */
@@ -116,13 +122,14 @@ export const recordHumanMatch = (t: Tournament, humanWon: boolean, sets: [number
   const next: Tournament = structuredClone(t);
   const results: MatchResult[] = [];
   for (const pair of pairings(t, round)) {
+    const skills: [number, number] = [next.entrants[pair[0]].skill, next.entrants[pair[1]].skill];
     if (pair.includes(HUMAN)) {
       const opponent = pair[0] === HUMAN ? pair[1] : pair[0];
       const winner = humanWon ? HUMAN : opponent;
-      results.push({ players: pair, winner, score: scoreLabel(sets, humanWon ? 0 : 1) });
+      results.push({ players: pair, winner, score: scoreLabel(sets, humanWon ? 0 : 1), skills });
     } else {
-      const sim = simulateMatch([next.entrants[pair[0]].skill, next.entrants[pair[1]].skill], rng);
-      results.push({ players: pair, winner: pair[sim.winner], score: scoreLabel(sim.sets, sim.winner) });
+      const sim = simulateMatch(skills, rng);
+      results.push({ players: pair, winner: pair[sim.winner], score: scoreLabel(sim.sets, sim.winner), skills });
     }
   }
   for (const r of results) {
@@ -143,7 +150,7 @@ export const recordHumanMatch = (t: Tournament, humanWon: boolean, sets: [number
 /** Validates state loaded from storage; returns null if it is unusable. */
 export const parseTournament = (raw: unknown): Tournament | null => {
   const t = raw as Tournament;
-  if (!t || t.version !== 1 || !Array.isArray(t.entrants) || t.entrants.length !== 8) return null;
+  if (!t || t.version !== 2 || typeof t.number !== 'number' || !Array.isArray(t.entrants) || t.entrants.length !== 8) return null;
   if (!Array.isArray(t.draws) || t.draws.length < 1 || t.draws.length > ROUND_NAMES.length) return null;
   if (!Array.isArray(t.results) || !['playing', 'won', 'lost'].includes(t.status)) return null;
   return t;
