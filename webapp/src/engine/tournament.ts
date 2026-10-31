@@ -3,7 +3,9 @@ import { Match } from './match';
 import type { Rng } from './resolution';
 import type { ScoringConfig } from './scoring';
 
+/** Starting skill for CPU entrants, and for a human with no saved skill yet. */
 export const TOURNAMENT_START_SKILL = 0.3;
+export const MAX_SKILL = 1;
 /** Each round a player wins adds a random gain of 0.00-0.05, in 0.01 steps. */
 export const TOURNAMENT_MAX_GAIN = 0.05;
 export const TOURNAMENT_SCORING: ScoringConfig = { setsToWin: 1, gamesPerSet: 4 };
@@ -50,9 +52,10 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /** A random skill gain of 0.00-0.05 in 0.01 steps, each equally likely. */
 export const rollGain = (rng: Rng): number => Math.floor(rng() * (TOURNAMENT_MAX_GAIN * 100 + 1)) / 100;
 
-export const createTournament = (rng: Rng = Math.random): Tournament => {
+/** `humanSkill` is the skill the player has carried over from earlier tournaments. */
+export const createTournament = (rng: Rng = Math.random, humanSkill = TOURNAMENT_START_SKILL): Tournament => {
   const names = shuffled(CPU_NAMES, rng).slice(0, 7);
-  const entrants: Entrant[] = [{ name: 'You', skill: TOURNAMENT_START_SKILL }, ...names.map((name) => ({ name, skill: TOURNAMENT_START_SKILL }))];
+  const entrants: Entrant[] = [{ name: 'You', skill: humanSkill }, ...names.map((name) => ({ name, skill: TOURNAMENT_START_SKILL }))];
   // The human's slot in the draw is random; the bracket pairs neighbours.
   const draw = shuffled(
     entrants.map((_, i) => i),
@@ -124,7 +127,7 @@ export const recordHumanMatch = (t: Tournament, humanWon: boolean, sets: [number
   }
   for (const r of results) {
     const w = next.entrants[r.winner];
-    w.skill = round2(w.skill + rollGain(rng));
+    w.skill = Math.min(MAX_SKILL, round2(w.skill + rollGain(rng)));
   }
   next.results.push(results);
   if (!humanWon) {

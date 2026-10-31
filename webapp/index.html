@@ -30,15 +30,18 @@
         <p class="tagline">Outsmart your opponent</p>
 
         <button id="resume" class="primary big hidden">Resume match</button>
-        <button class="primary big" data-act="quick">Quick match</button>
+        <button class="primary big" data-act="practice">Practice match</button>
         <button class="primary big" data-act="tournament">Tournament</button>
         <button class="ghost" data-open-help>How to play</button>
+        <button class="ghost" data-act="settings">Settings</button>
       </div>
     </div>
 
-    <div id="quick" class="overlay hidden">
+    <div id="settings" class="overlay hidden"></div>
+
+    <div id="practice" class="overlay hidden">
       <div class="menu-card">
-        <h2>Quick match</h2>
+        <h2>Practice match</h2>
         <div class="setting">
           <span class="setting-label">Your skill</span>
           <div class="segmented skills" data-setting="playerSkill" data-skill-options></div>
