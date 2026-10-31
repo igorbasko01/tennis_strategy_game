@@ -957,7 +957,16 @@ td.neg {
 
 .round .lost {
   color: var(--muted);
+}
+
+.round .lost .nm {
   text-decoration: line-through;
+}
+
+.round .sk {
+  color: var(--muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 .round .me {
@@ -1102,4 +1111,46 @@ td.neg {
 
 .result.l {
   color: var(--bad);
+}
+
+/* ------------------------------------------------------------ rankings */
+
+.ranking {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.ranking li {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 15px;
+}
+
+.ranking .rank {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ranking .sk {
+  font-variant-numeric: tabular-nums;
+}
+
+.ranking li.me {
+  background: rgba(205, 220, 57, 0.18);
+  border: 1px solid var(--lime);
+}
+
+.ranking li.me .nm {
+  color: var(--lime);
+  font-weight: 800;
 }

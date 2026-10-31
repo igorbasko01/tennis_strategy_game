@@ -22,6 +22,7 @@ import {
   outcomeLabel,
   parseProfile,
   profileStats,
+  rankings,
   saveTournamentRecord,
   summarizeTournament,
   type Profile,
@@ -242,6 +243,7 @@ export class App {
     menu.querySelector('[data-act="practice"]')!.addEventListener('click', () => this.showScreen('practice'));
     menu.querySelector('[data-act="settings"]')!.addEventListener('click', () => this.renderSettings());
     menu.querySelector('[data-act="profile"]')!.addEventListener('click', () => this.renderProfile());
+    menu.querySelector('[data-act="rankings"]')!.addEventListener('click', () => this.renderRankings());
     menu.querySelector('[data-act="tournament"]')!.addEventListener('click', () => {
       this.sound.unlock();
       if (!this.tournament) this.newTournament();
@@ -289,8 +291,8 @@ export class App {
   }
 
   /** Shows one full-screen overlay (or none, to reveal the match). */
-  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'profile' | 'settings' | 'over' | null): void {
-    for (const id of ['menu', 'practice', 'tournament', 'profile', 'settings', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
+  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'profile' | 'rankings' | 'settings' | 'over' | null): void {
+    for (const id of ['menu', 'practice', 'tournament', 'profile', 'rankings', 'settings', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
     $('#resume').classList.toggle('hidden', !(this.match && !this.match.isOver));
   }
 
@@ -728,6 +730,29 @@ export class App {
 
   // ---------------------------------------------------------------- profile
 
+  private renderRankings(): void {
+    const rows = rankings(this.profile, loadPlayerSkill())
+      .map(
+        (r) => `
+        <li class="${r.isPlayer ? 'me' : ''}">
+          <span class="rank">${r.rank}</span>
+          <span class="nm">${escapeHtml(r.name)}</span>
+          <b class="sk">${r.skill.toFixed(2)}</b>
+        </li>`,
+      )
+      .join('');
+    const el = $('#rankings');
+    el.innerHTML = `
+      <div class="menu-card">
+        <h2>Rankings</h2>
+        <p class="tagline">All players by skill</p>
+        <ol class="ranking">${rows}</ol>
+        <button class="ghost" data-act="back">Back</button>
+      </div>`;
+    this.showScreen('rankings');
+    el.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
+  }
+
   private renderProfile(): void {
     const stats = profileStats(this.profile);
     const tile = (label: string, value: string) => `<div class="stat-tile"><span class="setting-label">${label}</span><b>${value}</b></div>`;
@@ -821,9 +846,10 @@ export class App {
       const rows = pairings(t, r)
         .map((pair, i) => {
           const res = results?.[i];
-          const cell = (p: number) =>
-            `<span class="${res ? (res.winner === p ? 'won' : 'lost') : ''} ${p === HUMAN ? 'me' : ''}">${name(p)}</span>`;
-          return `<li>${cell(pair[0])}<span class="vs">vs</span>${cell(pair[1])}<span class="score">${res ? res.score : ''}</span></li>`;
+          // Played matches show the skill each player had at the time; upcoming ones their current skill.
+          const cell = (p: number, side: 0 | 1) =>
+            `<span class="${res ? (res.winner === p ? 'won' : 'lost') : ''} ${p === HUMAN ? 'me' : ''}"><span class="nm">${name(p)}</span> <small class="sk">${(res ? res.skills[side] : t.entrants[p].skill).toFixed(2)}</small></span>`;
+          return `<li>${cell(pair[0], 0)}<span class="vs">vs</span>${cell(pair[1], 1)}<span class="score">${res ? res.score : ''}</span></li>`;
         })
         .join('');
       return `<section class="round"><h3>${roundName}</h3><ul>${rows}</ul></section>`;
