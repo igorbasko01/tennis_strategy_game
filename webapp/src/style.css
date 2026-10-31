@@ -365,13 +365,9 @@ button:focus-visible {
   color: var(--read);
 }
 
-.context i.position.good,
-.calc-math i.position.good {
+.context i.position,
+.calc-math i.position {
   color: var(--good);
-}
-
-.calc-math i.position.bad {
-  color: var(--bad);
 }
 
 .context i.energy,

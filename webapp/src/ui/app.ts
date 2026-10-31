@@ -501,6 +501,12 @@ export class App {
     });
   }
 
+  private readWhat(d: Duel): string {
+    const read = `read ${escapeHtml(readLabel(d))}`;
+    // A wrong read whose energy term is still positive was partly saved by a scramble.
+    return d.readCalc.modifier < 0 && d.readCalc.energy > 0 ? `${read} · scrambled` : read;
+  }
+
   private shotWhat(d: Duel): string {
     if (d.kind === 'serve') return 'serve';
     if (d.shotCalc.position > 0) return 'in position';
@@ -513,7 +519,7 @@ export class App {
       <div class="calc">
         <span class="player-chip p${who}">${escapeHtml(this.names[who])}</span>
         <span class="calc-what">${what}</span>
-        <span class="calc-math">${c.skill.toFixed(2)} <i>${fmt(c.modifier)}</i>${c.position === 0 ? '' : ` <i class="position ${c.position > 0 ? 'good' : 'bad'}">${fmt(c.position)}</i>`}${c.energy === 0 ? '' : ` <i class="energy">${fmt(c.energy)}</i>`} <i class="luck">${fmt(c.random)}</i> = <b>${c.total.toFixed(2)}</b></span>
+        <span class="calc-math">${c.skill.toFixed(2)} <i>${fmt(c.modifier)}</i>${c.position === 0 ? '' : ` <i class="position">${fmt(c.position)}</i>`}${c.energy === 0 ? '' : ` <i class="energy">${fmt(c.energy)}</i>`} <i class="luck">${fmt(c.random)}</i> = <b>${c.total.toFixed(2)}</b></span>
       </div>`;
   }
 
@@ -534,7 +540,7 @@ export class App {
     panel.innerHTML = `
       <div class="panel-head">
         <span class="role ${winner === null ? '' : winner === 0 ? 'good' : 'bad'}">${escapeHtml(headline)}</span>
-        <span class="context">skill <i>shot/read</i> <i class="position good">position</i> <i class="energy">energy</i> <i class="luck">luck</i></span>
+        <span class="context">skill <i>shot/read</i> <i class="position">position</i> <i class="energy">energy</i> <i class="luck">luck</i></span>
       </div>
       <div class="duels">
         ${ex.duels
@@ -543,7 +549,7 @@ export class App {
           <div class="duel ${d.hitterWins ? 'hit' : 'held'}">
             <div class="duel-title"><span>${verb[d.kind]} · ${escapeHtml(shotLabel(d))}</span><b>${this.duelResult(d)}</b></div>
             ${this.calcRow(d.hitter, this.shotWhat(d), d.shotCalc)}
-            ${this.calcRow(d.defender, `read ${escapeHtml(readLabel(d))}`, d.readCalc)}
+            ${this.calcRow(d.defender, this.readWhat(d), d.readCalc)}
           </div>`,
           )
           .join('')}
@@ -880,6 +886,9 @@ export class App {
       every point and more at changeovers.</p>
       <p>While you are fresh you can scramble back from a wrong read and recover up to half its penalty, so early
       rallies last longer. As you tire that recovery fades, and every shot and read loses up to −0.15.</p>
+      <p>In the shot breakdown the purple <b>energy</b> term combines both: a plus means a scramble saved part of a
+      wrong read (the read is marked “scrambled”), a minus means fatigue. The energy a misread costs shows in the
+      bar by your name.</p>
       <h3>Serve vs. read</h3>
       <p class="small">Rows: serve (risk). Columns: receiver's read.</p>
       ${serveTable}
