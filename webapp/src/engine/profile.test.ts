@@ -55,6 +55,14 @@ describe('profile', () => {
     expect(profileStats(p)).toEqual({ tournaments: 2, titles: 0, matchesWon: 1, matchesLost: 1 });
   });
 
+  it('saves CPU skills into the roster and still labels an early exit by the human’s last round', () => {
+    const rng = seeded(7);
+    const t = recordHumanMatch(createTournament(rng), false, [[1, 2]], rng);
+    const p = saveTournamentRecord(emptyProfile(), t);
+    for (const e of t.entrants.slice(1)) expect(p.roster![e.name]).toBe(e.skill);
+    expect(outcomeLabel(p.tournaments[0])).toBe('Knocked out in the quarterfinal');
+  });
+
   it('survives a JSON round trip and rejects junk', () => {
     const p = saveTournamentRecord(emptyProfile(), createTournament(seeded(6)));
     expect(parseProfile(JSON.parse(JSON.stringify(p)))).toEqual(p);

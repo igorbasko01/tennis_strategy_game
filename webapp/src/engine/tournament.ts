@@ -11,7 +11,7 @@ export const TOURNAMENT_MAX_GAIN = 0.05;
 export const ROUND_NAMES = ['Quarterfinal', 'Semifinal', 'Final'] as const;
 export const HUMAN = 0;
 
-const CPU_NAMES = ['Ana', 'Bruno', 'Chen', 'Dara', 'Elio', 'Freya', 'Goran', 'Hana', 'Ivo', 'Jules', 'Kai', 'Lena', 'Milo', 'Nia'];
+export const CPU_NAMES = ['Ana', 'Bruno', 'Chen', 'Dara', 'Elio', 'Freya', 'Goran', 'Hana', 'Ivo', 'Jules', 'Kai', 'Lena', 'Milo', 'Nia'];
 
 export interface Entrant {
   name: string;
@@ -58,9 +58,20 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export const rollGain = (rng: Rng): number => Math.floor(rng() * (TOURNAMENT_MAX_GAIN * 100 + 1)) / 100;
 
 /** `humanSkill` is the skill the player has carried over from earlier tournaments. */
-export const createTournament = (rng: Rng = Math.random, humanSkill = TOURNAMENT_START_SKILL, number = 1): Tournament => {
+/** CPU players' skills carried over from earlier tournaments, by name. */
+export type Roster = Record<string, number>;
+
+export const createTournament = (
+  rng: Rng = Math.random,
+  humanSkill = TOURNAMENT_START_SKILL,
+  number = 1,
+  roster: Roster = {},
+): Tournament => {
   const names = shuffled(CPU_NAMES, rng).slice(0, 7);
-  const entrants: Entrant[] = [{ name: 'You', skill: humanSkill }, ...names.map((name) => ({ name, skill: TOURNAMENT_START_SKILL }))];
+  const entrants: Entrant[] = [
+    { name: 'You', skill: humanSkill },
+    ...names.map((name) => ({ name, skill: roster[name] ?? TOURNAMENT_START_SKILL })),
+  ];
   // The human's slot in the draw is random; the bracket pairs neighbours.
   const draw = shuffled(
     entrants.map((_, i) => i),
@@ -117,32 +128,54 @@ const scoreLabel = (sets: [number, number][], winnerSide: 0 | 1) =>
  */
 export const recordHumanMatch = (t: Tournament, humanWon: boolean, sets: [number, number][], rng: Rng = Math.random): Tournament => {
   if (t.status !== 'playing') throw new Error('Tournament is over');
-  const round = currentRound(t);
   const next: Tournament = structuredClone(t);
+  playRound(next, rng, { won: humanWon, sets });
+  if (!humanWon) {
+    next.status = 'lost';
+    // The CPUs still in the draw play on, so every tournament has a champion.
+    while (next.results.length < ROUND_NAMES.length) playRound(next, rng);
+  } else if (next.results.length === ROUND_NAMES.length) {
+    next.status = 'won';
+  }
+  return next;
+};
+
+/**
+ * Plays the current round in place: the human's match uses `human`, every other
+ * match is simulated. Winners gain skill and, unless it was the final, advance.
+ */
+const playRound = (t: Tournament, rng: Rng, human?: { won: boolean; sets: [number, number][] }): void => {
+  const round = currentRound(t);
   const results: MatchResult[] = [];
   for (const pair of pairings(t, round)) {
-    const skills: [number, number] = [next.entrants[pair[0]].skill, next.entrants[pair[1]].skill];
-    if (pair.includes(HUMAN)) {
+    const skills: [number, number] = [t.entrants[pair[0]].skill, t.entrants[pair[1]].skill];
+    if (human && pair.includes(HUMAN)) {
       const opponent = pair[0] === HUMAN ? pair[1] : pair[0];
-      const winner = humanWon ? HUMAN : opponent;
-      results.push({ players: pair, winner, score: scoreLabel(sets, humanWon ? 0 : 1), skills });
+      const winner = human.won ? HUMAN : opponent;
+      results.push({ players: pair, winner, score: scoreLabel(human.sets, human.won ? 0 : 1), skills });
     } else {
       const sim = simulateMatch(skills, rng);
       results.push({ players: pair, winner: pair[sim.winner], score: scoreLabel(sim.sets, sim.winner), skills });
     }
   }
   for (const r of results) {
-    const w = next.entrants[r.winner];
+    const w = t.entrants[r.winner];
     w.skill = Math.min(MAX_SKILL, round2(w.skill + rollGain(rng)));
   }
-  next.results.push(results);
-  if (!humanWon) {
-    next.status = 'lost';
-  } else if (round === ROUND_NAMES.length - 1) {
-    next.status = 'won';
-  } else {
-    next.draws.push(results.map((r) => r.winner));
-  }
+  t.results.push(results);
+  if (round < ROUND_NAMES.length - 1) t.draws.push(results.map((r) => r.winner));
+};
+
+/** The champion's entrant index, once the final has been played. */
+export const champion = (t: Tournament): number | null =>
+  t.results.length === ROUND_NAMES.length ? t.results[ROUND_NAMES.length - 1][0].winner : null;
+
+/** CPU skills after this tournament, merged into the roster. */
+export const updateRoster = (roster: Roster, t: Tournament): Roster => {
+  const next = { ...roster };
+  t.entrants.forEach((e, i) => {
+    if (i !== HUMAN) next[e.name] = e.skill;
+  });
   return next;
 };
 
