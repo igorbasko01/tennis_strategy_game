@@ -15,15 +15,6 @@ import {
 import type { Match } from './match';
 import type { Choice, Exchange, PlayerIndex, Rng } from './resolution';
 
-export type AiLevel = 'rookie' | 'pro' | 'champion';
-
-/** Softmax temperature per level; null means uniformly random. */
-const TEMPERATURE: Record<AiLevel, number | null> = {
-  rookie: null,
-  pro: 0.35,
-  champion: 0.12,
-};
-
 type Counts<K extends string> = Record<K, number>;
 
 const ones = <K extends string>(keys: readonly K[]): Counts<K> =>
@@ -55,19 +46,20 @@ const pick = <K extends string>(keys: readonly K[], scores: (k: K) => number, te
  * (to hit away from it), and samples from a softmax so it stays unpredictable.
  */
 export class AiOpponent {
-  private readonly temperature: number | null;
   private serveTargets = ones(SERVE_ACTIONS);
   private returnTargets = ones(ATTACK_ACTIONS);
   private rallyAttacks = ones(ATTACK_ACTIONS);
   private serveReads = ones(SERVE_RECEIVE_ACTIONS);
   private defendReads = ones(DEFEND_ACTIONS);
 
+  /**
+   * @param temperature Softmax temperature for choices: lower exploits learned
+   *   tendencies harder; null chooses uniformly at random.
+   */
   constructor(
-    readonly level: AiLevel,
+    private readonly temperature: number | null,
     private readonly rng: Rng = Math.random,
-  ) {
-    this.temperature = TEMPERATURE[level];
-  }
+  ) {}
 
   choose(match: Match, me: PlayerIndex): Choice {
     const kind = match.expectedChoice(me);

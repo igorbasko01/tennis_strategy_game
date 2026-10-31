@@ -709,10 +709,21 @@ button:focus-visible {
   color: var(--lime-ink);
 }
 
-.handoff-card .player-chip {
-  align-self: center;
-  font-size: 14px;
-  padding: 4px 14px;
+.segmented.skills button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 2px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.segmented.skills small {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.75;
 }
 
 .final-score {

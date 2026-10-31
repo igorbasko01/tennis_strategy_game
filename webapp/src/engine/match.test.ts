@@ -65,7 +65,7 @@ describe('Match', () => {
       return seed / 4294967296;
     };
     const m = new Match(players, { setsToWin: 2, gamesPerSet: 6 });
-    const ai = [new AiOpponent('champion', rng), new AiOpponent('rookie', rng)];
+    const ai = [new AiOpponent(0.12, rng), new AiOpponent(null, rng)];
     let guard = 0;
     while (!m.isOver && guard++ < 100000) {
       const c0 = ai[0].choose(m, 0);

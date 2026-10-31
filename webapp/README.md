@@ -10,7 +10,8 @@ first (portrait and landscape), with tablets and desktops also supported.
 - Serve phase (Wide / Body / T-Line vs. Wide / Neutral / T-Line reads) and rally phase (Cross-Court / Down the Line / Center Deep / Drop Shot).
 - Resolution that follows the design: `skill + action modifier + random(-0.3..0.3)`, shown in a per-shot breakdown.
 - Full tennis scoring: deuce/advantage, games, sets, tiebreaks, and serve rotation.
-- vs CPU (Rookie / Pro / Champion, which learns your habits) or 2 players on one device with a hand-off screen.
+- Single player vs CPU. Choose your skill and the CPU's from five tiers: Beginner 0.3, Club 0.4, Pro 0.5, Elite 0.6, Legend 0.7.
+  From Club up, the CPU learns your habits, and the higher its tier the harder it exploits them; a Beginner CPU picks at random.
 - 3D court with animated players and ball. You can tap the zones on the court as well as the buttons.
 
 ## Develop
