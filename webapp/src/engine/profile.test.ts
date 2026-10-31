@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyProfile, outcomeLabel, parseProfile, profileStats, saveTournamentRecord, summarizeTournament } from './profile';
-import { createTournament, recordHumanMatch } from './tournament';
+import { emptyProfile, outcomeLabel, parseProfile, profileStats, rankings, saveTournamentRecord, summarizeTournament } from './profile';
+import { CPU_NAMES, createTournament, recordHumanMatch } from './tournament';
 
 const seeded = (seed: number) => () => {
   seed = (seed * 1664525 + 1013904223) % 4294967296;
@@ -61,6 +61,20 @@ describe('profile', () => {
     const p = saveTournamentRecord(emptyProfile(), t);
     for (const e of t.entrants.slice(1)) expect(p.roster![e.name]).toBe(e.skill);
     expect(outcomeLabel(p.tournaments[0])).toBe('Knocked out in the quarterfinal');
+  });
+
+  it('ranks the player and every CPU by skill, sharing ranks on ties', () => {
+    const p = { ...emptyProfile(), roster: { Milo: 0.41, Ana: 0.35 } };
+    const rows = rankings(p, 0.35);
+    expect(rows).toHaveLength(CPU_NAMES.length + 1);
+    expect(rows.slice(0, 3).map((r) => [r.rank, r.name, r.skill])).toEqual([
+      [1, 'Milo', 0.41],
+      [2, 'You', 0.35],
+      [2, 'Ana', 0.35],
+    ]);
+    // Everyone not in the roster yet is at the starting skill, tied for 4th.
+    expect(rows.slice(3).every((r) => r.skill === 0.3 && r.rank === 4)).toBe(true);
+    expect(rows.filter((r) => r.isPlayer)).toHaveLength(1);
   });
 
   it('survives a JSON round trip and rejects junk', () => {

@@ -1,4 +1,4 @@
-import { HUMAN, ROUND_NAMES, updateRoster, type Roster, type Tournament } from './tournament';
+import { CPU_NAMES, HUMAN, ROUND_NAMES, TOURNAMENT_START_SKILL, updateRoster, type Roster, type Tournament } from './tournament';
 
 export type TournamentOutcome = 'playing' | 'won' | 'lost';
 
@@ -91,6 +91,25 @@ export const outcomeLabel = (r: TournamentRecord): string => {
     case 'playing':
       return `In progress · ${ROUND_NAMES[r.matches.length]}`;
   }
+};
+
+export interface RankingRow {
+  rank: number;
+  name: string;
+  skill: number;
+  isPlayer: boolean;
+}
+
+/**
+ * Every CPU player and the player, highest skill first. Equal skills share a
+ * rank; the player is listed first among equals, then CPUs by name.
+ */
+export const rankings = (p: Profile, playerSkill: number): RankingRow[] => {
+  const rows = [
+    { name: 'You', skill: playerSkill, isPlayer: true },
+    ...CPU_NAMES.map((name) => ({ name, skill: p.roster?.[name] ?? TOURNAMENT_START_SKILL, isPlayer: false })),
+  ].sort((a, b) => b.skill - a.skill || Number(b.isPlayer) - Number(a.isPlayer) || a.name.localeCompare(b.name));
+  return rows.map((row) => ({ ...row, rank: 1 + rows.filter((other) => other.skill > row.skill).length }));
 };
 
 export const parseProfile = (raw: unknown): Profile | null => {
