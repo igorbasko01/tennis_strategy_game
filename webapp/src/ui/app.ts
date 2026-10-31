@@ -663,8 +663,7 @@ export class App {
         </div>`;
       actions = `
         <button class="primary big" data-act="play">Play ${ROUND_NAMES[round].toLowerCase()}</button>
-        <button class="ghost" data-act="menu">Main menu</button>
-        <button class="ghost subtle" data-act="abandon">Start over</button>`;
+        <button class="ghost" data-act="menu">Main menu</button>`;
     } else {
       const lastRound = ROUND_NAMES[t.results.length - 1];
       head =
@@ -697,7 +696,6 @@ export class App {
         ${head}
         ${actions}
         <div class="bracket">${rounds}</div>
-        <p class="small-print">Everyone starts at skill 0.30. Each round won adds a random 0.00–0.05. Matches are one set to 4 games.</p>
       </div>`;
     this.showScreen('tournament');
     el.querySelector('[data-act="play"]')?.addEventListener('click', () => {
@@ -705,11 +703,6 @@ export class App {
       this.startMatch(this.tournamentSetup());
     });
     el.querySelector('[data-act="new"]')?.addEventListener('click', () => {
-      this.newTournament();
-      this.renderTournament();
-    });
-    el.querySelector('[data-act="abandon"]')?.addEventListener('click', () => {
-      if (!window.confirm('Start a new tournament? Your current progress will be lost.')) return;
       this.newTournament();
       this.renderTournament();
     });

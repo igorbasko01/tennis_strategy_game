@@ -843,14 +843,6 @@ td.neg {
 
 /* ------------------------------------------------------------ tournament */
 
-.ghost.subtle {
-  border: none;
-  margin-top: 0;
-  min-height: 40px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
 .next-match {
   display: flex;
   align-items: center;
@@ -957,11 +949,5 @@ td.neg {
 .tbd {
   margin: 0;
   font-size: 13px;
-  color: var(--muted);
-}
-
-.small-print {
-  margin: 4px 0 0;
-  font-size: 12px;
   color: var(--muted);
 }
