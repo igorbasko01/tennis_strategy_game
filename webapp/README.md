@@ -13,7 +13,7 @@ first (portrait and landscape), with tablets and desktops also supported.
 - Every match is the best of three games: the first to win two games wins.
 - Tennis scoring within each game (15/30/40, deuce and advantage), with the serve alternating every game.
 - **Practice match:** pick your skill and the CPU's from five tiers (Beginner 0.3, Club 0.4, Pro 0.5, Elite 0.6, Legend 0.7).
-- **Tournament:** an 8-player knockout (quarterfinal, semifinal, final), each match the best of three games. CPU opponents start at skill 0.30 and every round won adds a random 0.00–0.05. Your skill is saved and carries over, so each new tournament starts from what you have built up. Progress is saved in the browser between matches. Tournaments are numbered (#1, #2, …).
+- **Tournament:** an 8-player knockout (quarterfinal, semifinal, final), each match the best of three games. Every player starts at skill 0.30 and every round won adds a random 0.00–0.05. Skills are saved and carry over: yours, and those of the 14 CPU players, 7 of whom are drawn for each tournament. If you are knocked out, the rest of the draw is played out so every tournament has a champion. Progress is saved in the browser between matches. Tournaments are numbered (#1, #2, …).
 - **Profile:** your skill, tournaments played, titles and match record, plus every tournament with its result and each match you played in it. **Settings → Start fresh** wipes skill and history.
 - The CPU currently picks every decision at random; smarter behaviour will come later.
 - 3D court with animated players and ball. You can tap the zones on the court as well as the buttons.

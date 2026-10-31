@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CPU_NAMES,
   HUMAN,
+  champion,
+  updateRoster,
   MAX_SKILL,
   TOURNAMENT_START_SKILL,
   createTournament,
@@ -54,6 +57,34 @@ describe('tournament', () => {
       expect(r.skills).toEqual([t0.entrants[r.players[0]].skill, t0.entrants[r.players[1]].skill]);
     }
     expect(t1.startSkill).toBe(0.4);
+  });
+
+  it('brings CPU players in at their carried-over skill', () => {
+    const roster = Object.fromEntries(CPU_NAMES.map((n, i) => [n, 0.3 + i / 100]));
+    const t = createTournament(seeded(3), 0.3, 1, roster);
+    for (const e of t.entrants.slice(1)) expect(e.skill).toBe(roster[e.name]);
+  });
+
+  it('plays the rest of the draw after the human is knocked out, so there is a champion', () => {
+    const rng = seeded(12);
+    const t = recordHumanMatch(createTournament(rng), false, [[1, 2]], rng);
+    expect(t.status).toBe('lost');
+    expect(t.results).toHaveLength(3);
+    const winner = champion(t)!;
+    expect(winner).not.toBe(HUMAN);
+    // Only rounds the human played include them.
+    expect(t.results[1].some((r) => r.players.includes(HUMAN))).toBe(false);
+  });
+
+  it('keeps CPU skills in the roster after a tournament', () => {
+    const rng = seeded(13);
+    const t = recordHumanMatch(createTournament(rng), false, [[0, 2]], rng);
+    const roster = updateRoster({ Someone: 0.5 }, t);
+    expect(roster.Someone).toBe(0.5);
+    for (const e of t.entrants.slice(1)) expect(roster[e.name]).toBe(e.skill);
+    expect(roster.You).toBeUndefined();
+    // The champion won three rounds, so they gained (or at least kept) skill.
+    expect(t.entrants[champion(t)!].skill).toBeGreaterThanOrEqual(0.3);
   });
 
   it('rolls gains between 0.00 and 0.05 in 0.01 steps', () => {

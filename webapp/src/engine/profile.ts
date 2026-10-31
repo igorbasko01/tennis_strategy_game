@@ -1,4 +1,4 @@
-import { HUMAN, ROUND_NAMES, type Tournament } from './tournament';
+import { HUMAN, ROUND_NAMES, updateRoster, type Roster, type Tournament } from './tournament';
 
 export type TournamentOutcome = 'playing' | 'won' | 'lost';
 
@@ -27,9 +27,11 @@ export interface Profile {
   nextTournament: number;
   /** Oldest first. */
   tournaments: TournamentRecord[];
+  /** CPU players' skills, carried from one tournament to the next. */
+  roster?: Roster;
 }
 
-export const emptyProfile = (): Profile => ({ version: 1, nextTournament: 1, tournaments: [] });
+export const emptyProfile = (): Profile => ({ version: 1, nextTournament: 1, tournaments: [], roster: {} });
 
 /** "4–2 6–3" from the winner's side becomes "2–4 3–6". */
 const flipScore = (score: string) =>
@@ -62,6 +64,7 @@ export const saveTournamentRecord = (p: Profile, t: Tournament): Profile => {
   const others = p.tournaments.filter((x) => x.number !== record.number);
   return {
     ...p,
+    roster: updateRoster(p.roster ?? {}, t),
     nextTournament: Math.max(p.nextTournament, record.number + 1),
     tournaments: [...others, record].sort((a, b) => a.number - b.number),
   };

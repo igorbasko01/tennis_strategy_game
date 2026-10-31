@@ -23,12 +23,14 @@ import {
   parseProfile,
   profileStats,
   saveTournamentRecord,
+  summarizeTournament,
   type Profile,
 } from '../engine/profile';
 import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
 import {
   HUMAN,
   MAX_SKILL,
+  champion,
   ROUND_NAMES,
   TOURNAMENT_START_SKILL,
   createTournament,
@@ -713,7 +715,7 @@ export class App {
   }
 
   private newTournament(): void {
-    this.storeTournament(createTournament(Math.random, loadPlayerSkill(), this.profile.nextTournament));
+    this.storeTournament(createTournament(Math.random, loadPlayerSkill(), this.profile.nextTournament, this.profile.roster));
   }
 
   /** Saves the tournament and its entry in the player's history. */
@@ -803,11 +805,11 @@ export class App {
         <button class="primary big" data-act="play">Play ${ROUND_NAMES[round].toLowerCase()}</button>
         <button class="ghost" data-act="menu">Main menu</button>`;
     } else {
-      const lastRound = ROUND_NAMES[t.results.length - 1];
+      const winner = champion(t);
       head =
         t.status === 'won'
           ? `<div class="trophy" aria-hidden="true">🏆</div><p class="tagline">Champion! Final skill ${skill(HUMAN)}</p>`
-          : `<p class="tagline">Knocked out in the ${lastRound.toLowerCase()}</p>`;
+          : `<p class="tagline">${outcomeLabel(summarizeTournament(t))}${winner === null ? '' : ` · ${name(winner)} won`}</p>`;
       actions = `
         <button class="primary big" data-act="new">New tournament</button>
         <button class="ghost" data-act="menu">Main menu</button>`;
