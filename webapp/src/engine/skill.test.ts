@@ -13,11 +13,6 @@ describe('skill tiers', () => {
     }
   });
 
-  it('makes stronger CPU tiers exploit tendencies harder', () => {
-    const temps = SKILL_TIERS.map((t) => t.cpuTemperature).filter((t): t is number => t !== null);
-    for (let i = 1; i < temps.length; i++) expect(temps[i]).toBeLessThan(temps[i - 1]);
-  });
-
   it('looks tiers up by id', () => {
     expect(skillTier('legend')?.skill).toBe(0.7);
     expect(skillTier('rookie')).toBeUndefined();

@@ -29,6 +29,16 @@
         <h1>Tennis<br />Strategy</h1>
         <p class="tagline">Outsmart your opponent</p>
 
+        <button id="resume" class="primary big hidden">Resume match</button>
+        <button class="primary big" data-act="quick">Quick match</button>
+        <button class="primary big" data-act="tournament">Tournament</button>
+        <button class="ghost" data-open-help>How to play</button>
+      </div>
+    </div>
+
+    <div id="quick" class="overlay hidden">
+      <div class="menu-card">
+        <h2>Quick match</h2>
         <div class="setting">
           <span class="setting-label">Your skill</span>
           <div class="segmented skills" data-setting="playerSkill" data-skill-options></div>
@@ -45,12 +55,12 @@
             <button data-value="full">Best of 3</button>
           </div>
         </div>
-
         <button id="start" class="primary big">Start match</button>
-        <button id="resume" class="ghost hidden">Resume match</button>
-        <button class="ghost" data-open-help>How to play</button>
+        <button class="ghost" data-act="back">Back</button>
       </div>
     </div>
+
+    <div id="tournament" class="overlay hidden"></div>
 
     <div id="help" class="overlay hidden">
       <div class="sheet">

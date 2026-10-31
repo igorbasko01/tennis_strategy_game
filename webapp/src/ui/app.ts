@@ -18,6 +18,18 @@ import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
 import type { ScoringConfig } from '../engine/scoring';
 import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
+import {
+  HUMAN,
+  ROUND_NAMES,
+  TOURNAMENT_SCORING,
+  createTournament,
+  currentOpponent,
+  currentRound,
+  pairings,
+  parseTournament,
+  recordHumanMatch,
+  type Tournament,
+} from '../engine/tournament';
 import type { DecisionKind } from '../scene/layout';
 import { CourtScene } from '../scene/scene';
 import { Sound } from './sound';
@@ -65,6 +77,34 @@ const saveSettings = (s: Settings) => {
     // ignore
   }
 };
+
+const TOURNAMENT_KEY = 'tennis-strategy-tournament';
+
+const loadTournament = (): Tournament | null => {
+  try {
+    const raw = localStorage.getItem(TOURNAMENT_KEY);
+    return raw ? parseTournament(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveTournament = (t: Tournament | null) => {
+  try {
+    if (t) localStorage.setItem(TOURNAMENT_KEY, JSON.stringify(t));
+    else localStorage.removeItem(TOURNAMENT_KEY);
+  } catch {
+    // ignore
+  }
+};
+
+/** Everything needed to start (or restart) a match. */
+interface MatchSetup {
+  names: [string, string];
+  skills: [number, number];
+  scoring: ScoringConfig;
+  tournament: boolean;
+}
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -121,8 +161,10 @@ export class App {
   private readonly scene: CourtScene;
   private readonly sound = new Sound();
   private match: Match | null = null;
-  private ai = new AiOpponent(null);
-  private readonly names: [string, string] = ['You', 'CPU'];
+  private readonly ai = new AiOpponent();
+  private names: [string, string] = ['You', 'CPU'];
+  private setup: MatchSetup | null = null;
+  private tournament = loadTournament();
   /** Bumped whenever a match is abandoned so stale async flows stop. */
   private generation = 0;
   private markerTap: ((id: string) => void) | null = null;
@@ -141,7 +183,7 @@ export class App {
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
-      if (!$('#menu').classList.contains('hidden') || !$('#help').classList.contains('hidden')) return;
+      if (document.querySelector('.overlay:not(.hidden)')) return;
       const target = $('#panel').querySelector<HTMLButtonElement>('.primary:not([disabled])');
       if (target) {
         e.preventDefault();
@@ -154,13 +196,22 @@ export class App {
 
   private bindMenu(): void {
     const menu = $('#menu');
-    for (const seg of menu.querySelectorAll<HTMLElement>('[data-skill-options]')) {
+    const quick = $('#quick');
+    menu.querySelector('[data-act="quick"]')!.addEventListener('click', () => this.showScreen('quick'));
+    menu.querySelector('[data-act="tournament"]')!.addEventListener('click', () => {
+      this.sound.unlock();
+      if (!this.tournament) this.newTournament();
+      this.renderTournament();
+    });
+    quick.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
+
+    for (const seg of quick.querySelectorAll<HTMLElement>('[data-skill-options]')) {
       seg.innerHTML = SKILL_TIERS.map(
         (t) => `<button data-value="${t.id}"><span>${t.label}</span><small>${t.skill.toFixed(1)}</small></button>`,
       ).join('');
     }
     const sync = () => {
-      for (const seg of menu.querySelectorAll<HTMLElement>('.segmented')) {
+      for (const seg of quick.querySelectorAll<HTMLElement>('.segmented')) {
         const key = seg.dataset.setting as keyof Settings;
         for (const b of seg.querySelectorAll<HTMLButtonElement>('button')) {
           const on = String(this.settings[key]) === b.dataset.value;
@@ -169,7 +220,7 @@ export class App {
         }
       }
     };
-    menu.addEventListener('click', (e) => {
+    quick.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.segmented button');
       if (!b) return;
       const key = (b.parentElement as HTMLElement).dataset.setting as 'playerSkill' | 'cpuSkill' | 'length';
@@ -181,9 +232,9 @@ export class App {
 
     $('#start').addEventListener('click', () => {
       this.sound.unlock();
-      this.startMatch();
+      this.startMatch(this.quickSetup());
     });
-    $('#resume').addEventListener('click', () => this.showMenu(false));
+    $('#resume').addEventListener('click', () => this.showScreen(null));
     for (const b of document.querySelectorAll('[data-open-help]')) {
       b.addEventListener('click', () => $('#help').classList.remove('hidden'));
     }
@@ -193,30 +244,37 @@ export class App {
     });
   }
 
-  private showMenu(show: boolean): void {
-    $('#menu').classList.toggle('hidden', !show);
+  /** Shows one full-screen overlay (or none, to reveal the match). */
+  private showScreen(screen: 'menu' | 'quick' | 'tournament' | 'over' | null): void {
+    for (const id of ['menu', 'quick', 'tournament', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
     $('#resume').classList.toggle('hidden', !(this.match && !this.match.isOver));
+  }
+
+  private quickSetup(): MatchSetup {
+    return {
+      names: ['You', 'CPU'],
+      skills: [skillTier(this.settings.playerSkill)!.skill, skillTier(this.settings.cpuSkill)!.skill],
+      scoring: LENGTHS[this.settings.length],
+      tournament: false,
+    };
   }
 
   // ---------------------------------------------------------------- match flow
 
-  private startMatch(): void {
-    const s = this.settings;
+  private startMatch(setup: MatchSetup): void {
     this.generation++;
-    const player = skillTier(s.playerSkill)!;
-    const cpu = skillTier(s.cpuSkill)!;
+    this.setup = setup;
+    this.names = setup.names;
     const firstServer: PlayerIndex = Math.random() < 0.5 ? 0 : 1;
     this.match = new Match(
       [
-        { name: this.names[0], skill: player.skill },
-        { name: this.names[1], skill: cpu.skill },
+        { name: setup.names[0], skill: setup.skills[0] },
+        { name: setup.names[1], skill: setup.skills[1] },
       ],
-      LENGTHS[s.length],
+      setup.scoring,
       firstServer,
     );
-    this.ai = new AiOpponent(cpu.cpuTemperature);
-    $('#over').classList.add('hidden');
-    this.showMenu(false);
+    this.showScreen(null);
     this.scene.animator.speed = 1;
     void this.scene.resetPoint(firstServer, 'deuce', false);
     this.renderScoreboard();
@@ -235,7 +293,6 @@ export class App {
 
       const choices = [...match.lockedChoices] as [Choice, Choice];
       const outcome = match.resolve(Math.random);
-      this.ai.observe(choices[0], outcome.exchange);
 
       this.renderRevealing(choices);
       await this.scene.playExchange(outcome.exchange);
@@ -500,7 +557,7 @@ export class App {
       <div class="sb-table">${m ? row(0) + row(1) : '<div class="sb-title">Tennis Strategy</div>'}</div>
       <button class="icon-btn" data-open-help aria-label="How to play">?</button>
       <button class="icon-btn" data-action="mute" aria-label="Toggle sound">${this.sound.muted ? '🔇' : '🔊'}</button>`;
-    board.querySelector('[data-action="menu"]')!.addEventListener('click', () => this.showMenu(true));
+    board.querySelector('[data-action="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
     board.querySelector('[data-open-help]')!.addEventListener('click', () => $('#help').classList.remove('hidden'));
     board.querySelector('[data-action="mute"]')!.addEventListener('click', () => {
       this.sound.muted = !this.sound.muted;
@@ -528,12 +585,25 @@ export class App {
       ['Service pts won', (p) => `${st[p].servicePointsWon}/${st[p].servicePointsPlayed}`],
       ['Correct reads', (p) => `${st[p].readsCorrect}/${st[p].readsMade} (${pct(st[p].readsCorrect, st[p].readsMade)})`],
     ];
-    const title = w === 0 ? 'You win!' : 'CPU wins';
+    const title = w === 0 ? 'You win!' : `${this.names[1]} wins`;
+    const inTournament = this.setup?.tournament === true && this.tournament?.status === 'playing';
+    let subtitle = '';
+    if (inTournament) {
+      // Record the result straight away so a reload can't lose it.
+      const t = this.tournament!;
+      const roundName = ROUND_NAMES[currentRound(t)];
+      const before = t.entrants[HUMAN].skill;
+      this.tournament = recordHumanMatch(t, w === 0, m.score.completedSets);
+      saveTournament(this.tournament);
+      const gain = this.tournament.entrants[HUMAN].skill - before;
+      subtitle = w === 0 ? `${roundName} won · skill +${gain.toFixed(2)}` : `Knocked out in the ${roundName.toLowerCase()}`;
+    }
     const el = $('#over');
     el.innerHTML = `
       <div class="menu-card">
         <div class="ball-icon" aria-hidden="true"></div>
         <h2>${escapeHtml(title)}</h2>
+        ${subtitle ? `<p class="tagline">${escapeHtml(subtitle)}</p>` : ''}
         <p class="final-score">${m.score.completedSets.map((s) => `${s[w]}–${s[other(w)]}`).join('  ')}</p>
         <table class="stats">
           <thead><tr><th></th><th>${escapeHtml(this.names[0])}</th><th>${escapeHtml(this.names[1])}</th></tr></thead>
@@ -542,16 +612,108 @@ export class App {
             <tr><td>Longest rally</td><td colspan="2">${st[0].longestRally} shots</td></tr>
           </tbody>
         </table>
-        <button class="primary big" data-act="again">Play again</button>
+        ${
+          inTournament
+            ? '<button class="primary big" data-act="bracket">Continue</button>'
+            : '<button class="primary big" data-act="again">Play again</button>'
+        }
         <button class="ghost" data-act="menu">Main menu</button>
       </div>`;
-    el.classList.remove('hidden');
-    el.querySelector('[data-act="again"]')!.addEventListener('click', () => this.startMatch());
-    el.querySelector('[data-act="menu"]')!.addEventListener('click', () => {
-      el.classList.add('hidden');
-      this.showMenu(true);
-    });
+    this.showScreen('over');
+    el.querySelector('[data-act="again"]')?.addEventListener('click', () => this.startMatch(this.setup!));
+    el.querySelector('[data-act="bracket"]')?.addEventListener('click', () => this.renderTournament());
+    el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
     $('#panel').innerHTML = '';
+  }
+
+  // ---------------------------------------------------------------- tournament
+
+  private newTournament(): void {
+    this.tournament = createTournament();
+    saveTournament(this.tournament);
+  }
+
+  private tournamentSetup(): MatchSetup {
+    const t = this.tournament!;
+    const opp = t.entrants[currentOpponent(t)!];
+    return {
+      names: ['You', opp.name],
+      skills: [t.entrants[HUMAN].skill, opp.skill],
+      scoring: TOURNAMENT_SCORING,
+      tournament: true,
+    };
+  }
+
+  private renderTournament(): void {
+    const t = this.tournament!;
+    const round = currentRound(t);
+    const name = (i: number) => escapeHtml(t.entrants[i].name);
+    const skill = (i: number) => t.entrants[i].skill.toFixed(2);
+
+    let head: string;
+    let actions: string;
+    if (t.status === 'playing') {
+      const opp = currentOpponent(t)!;
+      head = `
+        <p class="tagline">${ROUND_NAMES[round]}</p>
+        <div class="next-match">
+          <div><span class="player-chip p0">You</span><b>${skill(HUMAN)}</b></div>
+          <span class="vs">vs</span>
+          <div><span class="player-chip p1">${name(opp)}</span><b>${skill(opp)}</b></div>
+        </div>`;
+      actions = `
+        <button class="primary big" data-act="play">Play ${ROUND_NAMES[round].toLowerCase()}</button>
+        <button class="ghost" data-act="menu">Main menu</button>
+        <button class="ghost subtle" data-act="abandon">Start over</button>`;
+    } else {
+      const lastRound = ROUND_NAMES[t.results.length - 1];
+      head =
+        t.status === 'won'
+          ? `<div class="trophy" aria-hidden="true">🏆</div><p class="tagline">Champion! Final skill ${skill(HUMAN)}</p>`
+          : `<p class="tagline">Knocked out in the ${lastRound.toLowerCase()}</p>`;
+      actions = `
+        <button class="primary big" data-act="new">New tournament</button>
+        <button class="ghost" data-act="menu">Main menu</button>`;
+    }
+
+    const rounds = ROUND_NAMES.map((roundName, r) => {
+      if (r >= t.draws.length) return `<section class="round"><h3>${roundName}</h3><p class="tbd">To be decided</p></section>`;
+      const results = t.results[r];
+      const rows = pairings(t, r)
+        .map((pair, i) => {
+          const res = results?.[i];
+          const cell = (p: number) =>
+            `<span class="${res ? (res.winner === p ? 'won' : 'lost') : ''} ${p === HUMAN ? 'me' : ''}">${name(p)}</span>`;
+          return `<li>${cell(pair[0])}<span class="vs">vs</span>${cell(pair[1])}<span class="score">${res ? res.score : ''}</span></li>`;
+        })
+        .join('');
+      return `<section class="round"><h3>${roundName}</h3><ul>${rows}</ul></section>`;
+    }).join('');
+
+    const el = $('#tournament');
+    el.innerHTML = `
+      <div class="menu-card">
+        <h2>Tournament</h2>
+        ${head}
+        ${actions}
+        <div class="bracket">${rounds}</div>
+        <p class="small-print">Everyone starts at skill 0.30. Each round won adds a random 0.00–0.05. Matches are one set to 4 games.</p>
+      </div>`;
+    this.showScreen('tournament');
+    el.querySelector('[data-act="play"]')?.addEventListener('click', () => {
+      this.sound.unlock();
+      this.startMatch(this.tournamentSetup());
+    });
+    el.querySelector('[data-act="new"]')?.addEventListener('click', () => {
+      this.newTournament();
+      this.renderTournament();
+    });
+    el.querySelector('[data-act="abandon"]')?.addEventListener('click', () => {
+      if (!window.confirm('Start a new tournament? Your current progress will be lost.')) return;
+      this.newTournament();
+      this.renderTournament();
+    });
+    el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
   }
 
   // ---------------------------------------------------------------- help
@@ -597,8 +759,8 @@ export class App {
       <ul>
         <li>Safe shots (Body, Center Deep) cost less but are easier to read.</li>
         <li>A correctly read drop shot gets a big +0.6 bonus — don't get predictable with it.</li>
-        <li>Skill (0.3 Beginner to 0.7 Legend) is added to every shot and read. Pick yours and the CPU's on the menu.</li>
-        <li>From Club up, the CPU learns your habits as the match goes on, and the higher its tier the harder it exploits them. Mix it up!</li>
+        <li>Skill is added to every shot and read. In a quick match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
+        <li>In a tournament everyone starts at 0.30 and each round won adds a random 0.00–0.05, so you may meet someone slightly stronger or weaker.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;
   }
