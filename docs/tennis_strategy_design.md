@@ -86,12 +86,12 @@ Shot total: skill \+ action cost \+ position \+ random factor.
    1. For Cross-Court:  
       1. Receive Cross-Court: \+0.3  
       2. Receive Down-the-Line: \-0.6  
-      3. Receive Center Deep: \-0.3  
+      3. Receive Center Deep: \-0.2  
       4. Receive Drop Shot: \-0.6  
    2. For Down The Line:  
       1. Receive Cross-Court: \-0.6  
       2. Receive Down The Line: \+0.3  
-      3. Receive Center Deep: \-0.1  
+      3. Receive Center Deep: \-0.4  
       4. Receive Drop Shot: \-0.3  
    3. For Center Deep:  
       1. Receive Cross-Court: \-0.3  
@@ -99,10 +99,12 @@ Shot total: skill \+ action cost \+ position \+ random factor.
       3. Receive Center Deep: \+0.3  
       4. Receive Drop Shot: \-0.3  
    4. For Drop Shot:   
-      1. Receive Cross Court: \-0.3  
-      2. Receive Down the Line: \-0.3  
-      3. Receive Center Deep: \-0.3  
+      1. Receive Cross Court: \-0.4  
+      2. Receive Down the Line: \-0.4  
+      3. Receive Center Deep: \-0.4  
       4. Receive Drop Shot: \+0.6
+
+Balance note: the risky attacks (Down The Line, Drop Shot) cost the most, so a wrong read against them is penalised harder than against the safe ones. At equal skill, against random reads, every attack wins roughly 49-60% of the time, and no attack is at least as good as another against every read.
 
 ### Examples
 
