@@ -87,6 +87,28 @@ describe('tournament', () => {
     expect(t.entrants[champion(t)!].skill).toBeGreaterThanOrEqual(0.3);
   });
 
+  it('puts every CPU in a draw: seven with the player and the rest in a simultaneous background draw', () => {
+    const t = createTournament(seeded(21));
+    const names = [...t.entrants.slice(1), ...t.background!].map((e) => e.name).sort();
+    expect(names).toEqual([...CPU_NAMES].sort());
+    expect(t.entrants).toHaveLength(8);
+    expect(t.background).toHaveLength(8);
+  });
+
+  it('plays the background draw out straight away, with at most seven winners gaining skill', () => {
+    const roster = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.4]));
+    const t = createTournament(seeded(22), 0.3, 1, roster);
+    const bg = t.background!;
+    for (const e of bg) {
+      expect(e.skill).toBeGreaterThanOrEqual(0.4);
+      expect(e.skill).toBeLessThanOrEqual(0.4 + 3 * 0.05 + 1e-9);
+    }
+    // 4 + 2 + 1 matches, and losers never gain.
+    expect(bg.filter((e) => e.skill > 0.4).length).toBeLessThanOrEqual(7);
+    const roster2 = updateRoster(roster, t);
+    for (const e of bg) expect(roster2[e.name]).toBe(e.skill);
+  });
+
   it('rolls gains between 0.00 and 0.05 in 0.01 steps', () => {
     expect(rollGain(() => 0)).toBe(0);
     expect(rollGain(() => 0.999999)).toBe(0.05);

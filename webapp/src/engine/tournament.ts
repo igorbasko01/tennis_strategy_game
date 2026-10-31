@@ -11,7 +11,9 @@ export const TOURNAMENT_MAX_GAIN = 0.05;
 export const ROUND_NAMES = ['Quarterfinal', 'Semifinal', 'Final'] as const;
 export const HUMAN = 0;
 
-export const CPU_NAMES = ['Ana', 'Bruno', 'Chen', 'Dara', 'Elio', 'Freya', 'Goran', 'Hana', 'Ivo', 'Jules', 'Kai', 'Lena', 'Milo', 'Nia'];
+export const CPU_NAMES = ['Ana', 'Bruno', 'Chen', 'Dara', 'Elio', 'Freya', 'Goran', 'Hana', 'Ivo', 'Jules', 'Kai', 'Lena', 'Milo', 'Nia', 'Oscar'];
+/** Players per draw. With 15 CPUs plus the human there are always two full draws. */
+const DRAW_SIZE = 8;
 
 export interface Entrant {
   name: string;
@@ -41,6 +43,11 @@ export interface Tournament {
   /** Completed results per round. */
   results: MatchResult[][];
   status: 'playing' | 'won' | 'lost';
+  /**
+   * The CPUs in the simultaneous draw the player is not in, with their skills
+   * after it was played out. Not shown to the player.
+   */
+  background?: Entrant[];
 }
 
 const shuffled = <T>(items: readonly T[], rng: Rng): T[] => {
@@ -67,17 +74,37 @@ export const createTournament = (
   number = 1,
   roster: Roster = {},
 ): Tournament => {
-  const names = shuffled(CPU_NAMES, rng).slice(0, 7);
-  const entrants: Entrant[] = [
-    { name: 'You', skill: humanSkill },
-    ...names.map((name) => ({ name, skill: roster[name] ?? TOURNAMENT_START_SKILL })),
-  ];
+  // Every CPU plays: 7 join the player's draw and the rest play the other draw at the same time.
+  const cpus = shuffled(CPU_NAMES, rng).map((name) => ({ name, skill: roster[name] ?? TOURNAMENT_START_SKILL }));
+  const entrants: Entrant[] = [{ name: 'You', skill: humanSkill }, ...cpus.slice(0, DRAW_SIZE - 1)];
+  const background = playKnockout(cpus.slice(DRAW_SIZE - 1), rng);
   // The human's slot in the draw is random; the bracket pairs neighbours.
   const draw = shuffled(
     entrants.map((_, i) => i),
     rng,
   );
-  return { version: 2, number, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing' };
+  return { version: 2, number, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing', background };
+};
+
+/** Plays a whole CPU knockout and returns the players with their skills afterwards. */
+const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
+  const out = players.map((p) => ({ ...p }));
+  let alive = shuffled(
+    out.map((_, i) => i),
+    rng,
+  );
+  while (alive.length > 1) {
+    const winners: number[] = [];
+    for (let i = 0; i < alive.length; i += 2) {
+      const pair = [alive[i], alive[i + 1]];
+      const sim = simulateMatch([out[pair[0]].skill, out[pair[1]].skill], rng);
+      const w = out[pair[sim.winner]];
+      w.skill = Math.min(MAX_SKILL, round2(w.skill + rollGain(rng)));
+      winners.push(pair[sim.winner]);
+    }
+    alive = winners;
+  }
+  return out;
 };
 
 /** Index of the round being played (0 = quarterfinal). */
@@ -176,6 +203,7 @@ export const updateRoster = (roster: Roster, t: Tournament): Roster => {
   t.entrants.forEach((e, i) => {
     if (i !== HUMAN) next[e.name] = e.skill;
   });
+  for (const e of t.background ?? []) next[e.name] = e.skill;
   return next;
 };
 
