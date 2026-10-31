@@ -33,10 +33,10 @@ export const SERVE_RECEIVE_MODIFIER: Record<ServeAction, Record<ServeReceiveActi
 
 /** attack -> defender anticipation -> modifier */
 export const DEFEND_MODIFIER: Record<AttackAction, Record<DefendAction, number>> = {
-  crossCourt: { crossCourt: 0.3, downTheLine: -0.6, centerDeep: -0.3, dropShot: -0.6 },
-  downTheLine: { crossCourt: -0.6, downTheLine: 0.3, centerDeep: -0.1, dropShot: -0.3 },
+  crossCourt: { crossCourt: 0.3, downTheLine: -0.6, centerDeep: -0.2, dropShot: -0.6 },
+  downTheLine: { crossCourt: -0.6, downTheLine: 0.3, centerDeep: -0.4, dropShot: -0.3 },
   centerDeep: { crossCourt: -0.3, downTheLine: -0.3, centerDeep: 0.3, dropShot: -0.3 },
-  dropShot: { crossCourt: -0.3, downTheLine: -0.3, centerDeep: -0.3, dropShot: 0.6 },
+  dropShot: { crossCourt: -0.4, downTheLine: -0.4, centerDeep: -0.4, dropShot: 0.6 },
 };
 
 export const SERVE_LABEL: Record<ServeAction, string> = {
