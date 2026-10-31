@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HUMAN,
+  MAX_SKILL,
   TOURNAMENT_START_SKILL,
   createTournament,
   currentOpponent,
@@ -27,6 +28,20 @@ describe('tournament', () => {
     expect([...t.draws[0]].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
     expect(currentRound(t)).toBe(0);
     expect(currentOpponent(t)).not.toBe(HUMAN);
+  });
+
+  it('starts the human from their carried-over skill while CPUs start fresh', () => {
+    const t = createTournament(seeded(1), 0.47);
+    expect(t.entrants[HUMAN].skill).toBe(0.47);
+    expect(t.entrants.slice(1).every((e) => e.skill === TOURNAMENT_START_SKILL)).toBe(true);
+  });
+
+  it('never raises skill above the maximum', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      const rng = seeded(seed);
+      const t = recordHumanMatch(createTournament(rng, MAX_SKILL), true, [[4, 0]], rng);
+      expect(t.entrants[HUMAN].skill).toBe(MAX_SKILL);
+    }
   });
 
   it('rolls gains between 0.00 and 0.05 in 0.01 steps', () => {

@@ -20,7 +20,9 @@ import type { ScoringConfig } from '../engine/scoring';
 import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
 import {
   HUMAN,
+  MAX_SKILL,
   ROUND_NAMES,
+  TOURNAMENT_START_SKILL,
   TOURNAMENT_SCORING,
   createTournament,
   currentOpponent,
@@ -79,6 +81,25 @@ const saveSettings = (s: Settings) => {
 };
 
 const TOURNAMENT_KEY = 'tennis-strategy-tournament';
+const PLAYER_SKILL_KEY = 'tennis-strategy-player-skill';
+
+/** The skill the player has built up across tournaments. */
+const loadPlayerSkill = (): number => {
+  try {
+    const n = Number(localStorage.getItem(PLAYER_SKILL_KEY));
+    return n >= TOURNAMENT_START_SKILL && n <= MAX_SKILL ? n : TOURNAMENT_START_SKILL;
+  } catch {
+    return TOURNAMENT_START_SKILL;
+  }
+};
+
+const savePlayerSkill = (skill: number) => {
+  try {
+    localStorage.setItem(PLAYER_SKILL_KEY, String(skill));
+  } catch {
+    // ignore
+  }
+};
 
 const loadTournament = (): Tournament | null => {
   try {
@@ -196,22 +217,22 @@ export class App {
 
   private bindMenu(): void {
     const menu = $('#menu');
-    const quick = $('#quick');
-    menu.querySelector('[data-act="quick"]')!.addEventListener('click', () => this.showScreen('quick'));
+    const practice = $('#practice');
+    menu.querySelector('[data-act="practice"]')!.addEventListener('click', () => this.showScreen('practice'));
     menu.querySelector('[data-act="tournament"]')!.addEventListener('click', () => {
       this.sound.unlock();
       if (!this.tournament) this.newTournament();
       this.renderTournament();
     });
-    quick.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
+    practice.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
 
-    for (const seg of quick.querySelectorAll<HTMLElement>('[data-skill-options]')) {
+    for (const seg of practice.querySelectorAll<HTMLElement>('[data-skill-options]')) {
       seg.innerHTML = SKILL_TIERS.map(
         (t) => `<button data-value="${t.id}"><span>${t.label}</span><small>${t.skill.toFixed(1)}</small></button>`,
       ).join('');
     }
     const sync = () => {
-      for (const seg of quick.querySelectorAll<HTMLElement>('.segmented')) {
+      for (const seg of practice.querySelectorAll<HTMLElement>('.segmented')) {
         const key = seg.dataset.setting as keyof Settings;
         for (const b of seg.querySelectorAll<HTMLButtonElement>('button')) {
           const on = String(this.settings[key]) === b.dataset.value;
@@ -220,7 +241,7 @@ export class App {
         }
       }
     };
-    quick.addEventListener('click', (e) => {
+    practice.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.segmented button');
       if (!b) return;
       const key = (b.parentElement as HTMLElement).dataset.setting as 'playerSkill' | 'cpuSkill' | 'length';
@@ -232,7 +253,7 @@ export class App {
 
     $('#start').addEventListener('click', () => {
       this.sound.unlock();
-      this.startMatch(this.quickSetup());
+      this.startMatch(this.practiceSetup());
     });
     $('#resume').addEventListener('click', () => this.showScreen(null));
     for (const b of document.querySelectorAll('[data-open-help]')) {
@@ -245,12 +266,12 @@ export class App {
   }
 
   /** Shows one full-screen overlay (or none, to reveal the match). */
-  private showScreen(screen: 'menu' | 'quick' | 'tournament' | 'over' | null): void {
-    for (const id of ['menu', 'quick', 'tournament', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
+  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'over' | null): void {
+    for (const id of ['menu', 'practice', 'tournament', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
     $('#resume').classList.toggle('hidden', !(this.match && !this.match.isOver));
   }
 
-  private quickSetup(): MatchSetup {
+  private practiceSetup(): MatchSetup {
     return {
       names: ['You', 'CPU'],
       skills: [skillTier(this.settings.playerSkill)!.skill, skillTier(this.settings.cpuSkill)!.skill],
@@ -595,6 +616,8 @@ export class App {
       const before = t.entrants[HUMAN].skill;
       this.tournament = recordHumanMatch(t, w === 0, m.score.completedSets);
       saveTournament(this.tournament);
+      // Skill won in the tournament stays with the player for the next one.
+      savePlayerSkill(this.tournament.entrants[HUMAN].skill);
       const gain = this.tournament.entrants[HUMAN].skill - before;
       subtitle = w === 0 ? `${roundName} won · skill +${gain.toFixed(2)}` : `Knocked out in the ${roundName.toLowerCase()}`;
     }
@@ -629,7 +652,7 @@ export class App {
   // ---------------------------------------------------------------- tournament
 
   private newTournament(): void {
-    this.tournament = createTournament();
+    this.tournament = createTournament(Math.random, loadPlayerSkill());
     saveTournament(this.tournament);
   }
 
@@ -752,8 +775,8 @@ export class App {
       <ul>
         <li>Safe shots (Body, Center Deep) cost less but are easier to read.</li>
         <li>A correctly read drop shot gets a big +0.6 bonus — don't get predictable with it.</li>
-        <li>Skill is added to every shot and read. In a quick match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
-        <li>In a tournament everyone starts at 0.30 and each round won adds a random 0.00–0.05, so you may meet someone slightly stronger or weaker.</li>
+        <li>Skill is added to every shot and read. In a practice match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
+        <li>In a tournament the CPUs start at 0.30 and each round won adds a random 0.00–0.05. Your skill carries over from one tournament to the next.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;
   }
