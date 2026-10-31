@@ -26,9 +26,9 @@ export const ATTACK_COST: Record<AttackAction, number> = {
 
 /** serve -> receiver anticipation -> modifier */
 export const SERVE_RECEIVE_MODIFIER: Record<ServeAction, Record<ServeReceiveAction, number>> = {
-  wide: { wide: 0.3, neutral: -0.3, tLine: -0.6 },
+  wide: { wide: 0.3, neutral: -0.4, tLine: -0.6 },
   body: { wide: -0.3, neutral: 0.3, tLine: -0.3 },
-  tLine: { wide: -0.6, neutral: -0.3, tLine: 0.3 },
+  tLine: { wide: -0.6, neutral: -0.4, tLine: 0.3 },
 };
 
 /** attack -> defender anticipation -> modifier */

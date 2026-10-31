@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { ATTACK_ACTIONS, ATTACK_COST, DEFEND_ACTIONS, DEFEND_MODIFIER, type AttackAction } from './actions';
+import {
+  ATTACK_ACTIONS,
+  ATTACK_COST,
+  DEFEND_ACTIONS,
+  DEFEND_MODIFIER,
+  SERVE_ACTIONS,
+  SERVE_COST,
+  SERVE_RECEIVE_ACTIONS,
+  SERVE_RECEIVE_MODIFIER,
+  type AttackAction,
+  type ServeAction,
+  type ServeReceiveAction,
+} from './actions';
 import { RANDOM_RANGE } from './resolution';
 
 /**
@@ -39,6 +51,36 @@ describe('rally balance', () => {
   it('lets every attack beat some wrong read without luck', () => {
     for (const a of ATTACK_ACTIONS) {
       expect(Math.max(...DEFEND_ACTIONS.map((d) => margin(a, d))), a).toBeGreaterThan(0);
+    }
+  });
+});
+
+const serveMargin = (s: ServeAction, r: ServeReceiveAction) => SERVE_COST[s] - SERVE_RECEIVE_MODIFIER[s][r];
+
+describe('serve balance', () => {
+  it('keeps every serve between 45% and 60% against random reads', () => {
+    for (const sv of SERVE_ACTIONS) {
+      const p = SERVE_RECEIVE_ACTIONS.reduce((sum, r) => sum + winProbability(serveMargin(sv, r)), 0) / SERVE_RECEIVE_ACTIONS.length;
+      expect(p, sv).toBeGreaterThan(0.45);
+      expect(p, sv).toBeLessThan(0.6);
+    }
+  });
+
+  it('has no serve that is at least as good as another against every read', () => {
+    for (const a of SERVE_ACTIONS) {
+      for (const b of SERVE_ACTIONS) {
+        if (a === b) continue;
+        const dominates = SERVE_RECEIVE_ACTIONS.every((r) => serveMargin(a, r) >= serveMargin(b, r));
+        expect(dominates, `${a} dominates ${b}`).toBe(false);
+      }
+    }
+  });
+
+  it('lets every serve beat every wrong read without luck', () => {
+    for (const sv of SERVE_ACTIONS) {
+      for (const r of SERVE_RECEIVE_ACTIONS) {
+        if (SERVE_RECEIVE_MODIFIER[sv][r] < 0) expect(serveMargin(sv, r), `${sv} vs ${r}`).toBeGreaterThan(0);
+      }
     }
   });
 });

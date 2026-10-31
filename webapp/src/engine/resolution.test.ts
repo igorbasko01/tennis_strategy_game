@@ -49,10 +49,10 @@ describe('design doc examples', () => {
     expect(ex.duels[0].hitterWins).toBe(false);
   });
 
-  it('serve wide, receive neutral: tie goes to the receiver (0.2 vs 0.2)', () => {
+  it('serve wide, receive neutral: serve wins (0.2 vs 0.1)', () => {
     const ex = resolveServeExchange(0, skills, server('wide'), receiver('neutral'), neutral);
-    expect(ex.duels[0].readCalc.total).toBeCloseTo(0.2);
-    expect(ex.duels[0].hitterWins).toBe(false);
+    expect(ex.duels[0].readCalc.total).toBeCloseTo(0.1);
+    expect(ex.duels[0].hitterWins).toBe(true);
   });
 
   it('serve wide, receive T-line: serve wins the point (0.2 vs -0.1)', () => {

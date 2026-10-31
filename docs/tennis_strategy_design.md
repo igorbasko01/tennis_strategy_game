@@ -67,7 +67,7 @@ Shot total: skill \+ action cost \+ position \+ random factor.
 2. Serve Receive Actions:  
    1. For Serve Wide:  
       1. Receive Wide: \+0.3  
-      2. Receive Neutral: \-0.3  
+      2. Receive Neutral: \-0.4  
       3. Receive T-Line: \-0.6  
    2. For Serve Body:  
       1. Receive Wide: \-0.3  
@@ -75,7 +75,7 @@ Shot total: skill \+ action cost \+ position \+ random factor.
       3. Receive T-Line: \-0.3  
    3. For Serve T-Line:  
       1. Receive Wide: \-0.6  
-      2. Receive Neutral: \-0.3  
+      2. Receive Neutral: \-0.4  
       3. Receive T-Line: \+0.3  
 3. Attack Actions:  
    1. Cross-Court: \-0.2  
@@ -104,7 +104,7 @@ Shot total: skill \+ action cost \+ position \+ random factor.
       3. Receive Center Deep: \-0.4  
       4. Receive Drop Shot: \+0.6
 
-Balance note: the risky attacks (Down The Line, Drop Shot) cost the most, so a wrong read against them is penalised harder than against the safe ones. At equal skill, against random reads, every attack wins roughly 49-60% of the time, and no attack is at least as good as another against every read.
+Balance note: the risky serves (Wide, T-Line) and attacks (Down The Line, Drop Shot) cost the most, so a wrong read against them is penalised harder than against the safe ones. At equal skill, against random reads, every serve wins roughly 51-54% of the time and every attack roughly 49-60%, and no serve or attack is at least as good as another against every read.
 
 ### Examples
 
@@ -121,12 +121,12 @@ Receiver skill: 0.5
    7. Check (Serve \> Receive) 0.2 \< 0.8 receive was successful.  
 2. Serve Wide, Receives Neutral:  
    1. Wide Serve \- skill \-0.3  
-   2. Anticipation Failure (low): \-0.3  
+   2. Anticipation Failure (low): \-0.4  
    3. Serve Random Factor (-0.3 \+ 0.3) \- 0  
    4. Receive Random Factor (-0.3 \+ 0.3) \- 0  
    5. Serve total: 0.5 \- 0.3 \+ 0 \= 0.2  
-   6. Receive total: 0.5 \- 0.3 \+ 0 \= 0.2  
-   7. Check (Serve \> Receive) 0.2 \= 0.2 receive was successful.  
+   6. Receive total: 0.5 \- 0.4 \+ 0 \= 0.1  
+   7. Check (Serve \> Receive) 0.2 \> 0.1 serve was successful.  
 3. Serve Wide, Receives T-Line:  
    1. Wide Serve \- skill \-0.3  
    2. Anticipation Failure (high): \-0.6  
