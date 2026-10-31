@@ -84,16 +84,14 @@ describe('Match', () => {
       return seed / 4294967296;
     };
     const m = new Match(players, { setsToWin: 2, gamesPerSet: 6 });
-    const ai = [new AiOpponent(0.12, rng), new AiOpponent(null, rng)];
+    const ai = [new AiOpponent(rng), new AiOpponent(rng)];
     let guard = 0;
     while (!m.isOver && guard++ < 100000) {
       const c0 = ai[0].choose(m, 0);
       const c1 = ai[1].choose(m, 1);
       m.submit(0, c0);
       m.submit(1, c1);
-      const { exchange } = m.resolve(rng);
-      ai[0].observe(c1, exchange);
-      ai[1].observe(c0, exchange);
+      m.resolve(rng);
     }
     expect(m.isOver).toBe(true);
     expect(m.score.setsWon[m.score.winner!]).toBe(2);

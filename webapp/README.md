@@ -10,8 +10,9 @@ first (portrait and landscape), with tablets and desktops also supported.
 - Serve phase (Wide / Body / T-Line vs. Wide / Neutral / T-Line reads) and rally phase (Cross-Court / Down the Line / Center Deep / Drop Shot).
 - Resolution that follows the design: `skill + action modifier + random(-0.3..0.3)`, shown in a per-shot breakdown.
 - Full tennis scoring: deuce/advantage, games, sets, tiebreaks, and serve rotation.
-- Single player vs CPU. Choose your skill and the CPU's from five tiers: Beginner 0.3, Club 0.4, Pro 0.5, Elite 0.6, Legend 0.7.
-  From Club up, the CPU learns your habits, and the higher its tier the harder it exploits them; a Beginner CPU picks at random.
+- **Quick match:** pick your skill and the CPU's from five tiers (Beginner 0.3, Club 0.4, Pro 0.5, Elite 0.6, Legend 0.7) and a match length.
+- **Tournament:** an 8-player knockout (quarterfinal, semifinal, final), each match one set to 4 games. Everyone starts at skill 0.30 and every round won adds a random 0.00–0.05, so opponents end up slightly stronger or weaker than you. Progress is saved in the browser between matches.
+- The CPU currently picks every decision at random; smarter behaviour will come later.
 - 3D court with animated players and ball. You can tap the zones on the court as well as the buttons.
 
 ## Develop
@@ -33,7 +34,9 @@ src/
 │   ├── resolution.ts # Shot vs. read resolution
 │   ├── scoring.ts    # Points / games / sets / tiebreaks
 │   ├── match.ts      # Turn flow, choice collection, stats
-│   └── ai.ts         # CPU opponent
+│   ├── ai.ts         # CPU opponent (random choices)
+│   ├── skill.ts      # Quick-match skill tiers
+│   └── tournament.ts # Knockout bracket, skill gains, CPU-vs-CPU simulation
 ├── scene/            # three.js court, players, ball, animation
 └── ui/               # DOM panels, menus, sound
 ```
