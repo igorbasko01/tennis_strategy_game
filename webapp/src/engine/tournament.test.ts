@@ -44,6 +44,18 @@ describe('tournament', () => {
     }
   });
 
+  it('keeps its number and the human’s starting skill, and records skills at match time', () => {
+    const rng = seeded(8);
+    const t0 = createTournament(rng, 0.4, 7);
+    expect(t0.number).toBe(7);
+    expect(t0.startSkill).toBe(0.4);
+    const t1 = recordHumanMatch(t0, true, [[4, 3]], rng);
+    for (const r of t1.results[0]) {
+      expect(r.skills).toEqual([t0.entrants[r.players[0]].skill, t0.entrants[r.players[1]].skill]);
+    }
+    expect(t1.startSkill).toBe(0.4);
+  });
+
   it('rolls gains between 0.00 and 0.05 in 0.01 steps', () => {
     expect(rollGain(() => 0)).toBe(0);
     expect(rollGain(() => 0.999999)).toBe(0.05);
