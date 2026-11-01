@@ -58,6 +58,12 @@ This applies to the return (from the serve read), the counter-attack (from the r
 
 Shot total: skill \+ action cost \+ position \+ random factor.
 
+### Tournament skill
+
+Every player starts tournaments at skill 0.30, and skill carries over from one tournament to the next. After each tournament match the winner gains, and the loser loses, 0.08 × (1 − the winner's expected chance of winning), rounded to 0.01 and capped at 0.06. The expected chance is 1 / (1 + e^(−gap / 0.05)), where gap is the winner's skill minus the loser's. So a strong player beating a much weaker one gains almost nothing, while an upset moves up to 0.06 each way. Skill stays between 0.20 and 1.00.
+
+Sitting out a tournament costs a random 0.01–0.05 skill, but rest never takes a player below the starting 0.30.
+
 ### Energy
 
 Each player has energy from 100% (fresh) to 0% (exhausted). It is full at the start of a practice match. In tournaments energy carries over, both between matches and between tournaments, and each player regains 30% after every match (never above 100%). A player can skip a tournament to regain another 30%; CPUs skip below 50% energy, and 10% of the time at random. A short field is filled with byes.

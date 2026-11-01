@@ -8,9 +8,26 @@ import { STYLES, type StyleId } from './styles';
 /** Starting skill for CPU entrants, and for a human with no saved skill yet. */
 export const TOURNAMENT_START_SKILL = 0.3;
 export const MAX_SKILL = 1;
-/** Each round a player wins adds a random gain of 0.01-0.05, in 0.01 steps. */
-export const TOURNAMENT_MIN_GAIN = 0.01;
-export const TOURNAMENT_MAX_GAIN = 0.05;
+/** Skill never drops below this. */
+export const MIN_SKILL = 0.2;
+
+/**
+ * Skill changes after a match depend on how surprising the result was: the
+ * winner gains and the loser loses RESULT_WEIGHT x (1 - winner's expected
+ * chance), rounded to 0.01 and capped at MAX_RESULT_CHANGE. An expected win
+ * over a much weaker player is worth nothing.
+ */
+const RESULT_WEIGHT = 0.08;
+export const MAX_RESULT_CHANGE = 0.06;
+/** Skill gap at which the stronger player is about 73% to win a match (fitted by simulation). */
+const SKILL_GAP_SCALE = 0.05;
+
+/**
+ * Sitting out a tournament costs a random 0.01-0.05 skill, in 0.01 steps, but
+ * never takes a player below the starting skill.
+ */
+export const SKIP_DECAY_MIN = 0.01;
+export const SKIP_DECAY_MAX = 0.05;
 export const ROUND_NAMES = ['Quarterfinal', 'Semifinal', 'Final'] as const;
 export const HUMAN = 0;
 
@@ -72,10 +89,28 @@ const shuffled = <T>(items: readonly T[], rng: Rng): T[] => {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** A random skill gain of 0.01-0.05 in 0.01 steps, each equally likely. */
-export const rollGain = (rng: Rng): number => {
-  const steps = Math.round((TOURNAMENT_MAX_GAIN - TOURNAMENT_MIN_GAIN) * 100) + 1;
-  return Math.round(TOURNAMENT_MIN_GAIN * 100 + Math.floor(rng() * steps)) / 100;
+/** A random skill loss of 0.01-0.05 in 0.01 steps, each equally likely. */
+export const rollDecay = (rng: Rng): number => {
+  const steps = Math.round((SKIP_DECAY_MAX - SKIP_DECAY_MIN) * 100) + 1;
+  return Math.round(SKIP_DECAY_MIN * 100 + Math.floor(rng() * steps)) / 100;
+};
+
+/** Skill after sitting out a tournament. */
+export const decaySkill = (skill: number, rng: Rng): number =>
+  skill <= TOURNAMENT_START_SKILL ? skill : Math.max(TOURNAMENT_START_SKILL, round2(skill - rollDecay(rng)));
+
+/** The chance that a player of skill `a` beats a player of skill `b` in a match. */
+export const expectedWin = (a: number, b: number): number => 1 / (1 + Math.exp(-(a - b) / SKILL_GAP_SCALE));
+
+/** How much skill moves after a match: little for an expected win, a lot for an upset. */
+export const resultChange = (winnerSkill: number, loserSkill: number): number =>
+  Math.min(MAX_RESULT_CHANGE, round2(RESULT_WEIGHT * (1 - expectedWin(winnerSkill, loserSkill))));
+
+/** The winner gains what the loser loses, within the skill limits. */
+const applyResult = (winner: Entrant, loser: Entrant): void => {
+  const change = resultChange(winner.skill, loser.skill);
+  winner.skill = Math.min(MAX_SKILL, round2(winner.skill + change));
+  loser.skill = Math.max(MIN_SKILL, round2(loser.skill - change));
 };
 
 /** CPU players' skills carried over from earlier tournaments, by name. */
@@ -95,7 +130,10 @@ const chooseEntrants = (cpus: Entrant[], rng: Rng, minPlaying: number) => {
   }
   resting.sort((a, b) => (b.energy ?? FULL_ENERGY) - (a.energy ?? FULL_ENERGY));
   while (playing.length < minPlaying && resting.length) playing.push(resting.shift()!);
-  return { playing, resting: resting.map((c) => ({ ...c, energy: restBySkipping(c.energy ?? FULL_ENERGY) })) };
+  return {
+    playing,
+    resting: resting.map((c) => ({ ...c, energy: restBySkipping(c.energy ?? FULL_ENERGY), skill: decaySkill(c.skill, rng) })),
+  };
 };
 
 const loadCpus = (rng: Rng, roster: Roster, styles: Record<string, StyleId>, energies: Energies): Entrant[] =>
@@ -159,8 +197,7 @@ const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
       ]);
       out[pair[0]].energy = restBetweenMatches(sim.energy[0]);
       out[pair[1]].energy = restBetweenMatches(sim.energy[1]);
-      const w = out[pair[sim.winner]];
-      w.skill = Math.min(MAX_SKILL, round2(w.skill + rollGain(rng)));
+      applyResult(out[pair[sim.winner]], out[pair[1 - sim.winner]]);
       winners.push(pair[sim.winner]);
     }
     alive = winners;
@@ -292,8 +329,8 @@ const playRound = (
     }
   }
   for (const r of results) {
-    const w = t.entrants[r.winner];
-    w.skill = Math.min(MAX_SKILL, round2(w.skill + rollGain(rng)));
+    const loser = r.players[0] === r.winner ? r.players[1] : r.players[0];
+    applyResult(t.entrants[r.winner], t.entrants[loser]);
   }
   t.results.push(results);
   if (round < ROUND_NAMES.length - 1) t.draws.push(results.map((r) => r.winner));
