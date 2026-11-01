@@ -6,7 +6,9 @@ import {
   playTournamentWithoutPlayer,
   updateEnergies,
   updateRoster,
+  MAX_RESULT_CHANGE,
   MAX_SKILL,
+  MIN_SKILL,
   TOURNAMENT_START_SKILL,
   createTournament,
   currentOpponent,
@@ -14,7 +16,10 @@ import {
   pairings,
   parseTournament,
   recordHumanMatch,
-  rollGain,
+  decaySkill,
+  expectedWin,
+  resultChange,
+  rollDecay,
   simulateMatch,
 } from './tournament';
 
@@ -97,16 +102,16 @@ describe('tournament', () => {
     expect(t.background).toHaveLength(8);
   });
 
-  it('plays the background draw out straight away, with at most seven winners gaining skill', () => {
+  it('plays the background draw out straight away, winners taking skill from losers', () => {
     const roster = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.4]));
     const t = createTournament(seeded(22), 0.3, 1, roster);
     const bg = t.background!;
-    for (const e of bg) {
-      expect(e.skill).toBeGreaterThanOrEqual(0.4);
-      expect(e.skill).toBeLessThanOrEqual(0.4 + 3 * 0.05 + 1e-9);
-    }
-    // 4 + 2 + 1 matches, and losers never gain.
-    expect(bg.filter((e) => e.skill > 0.4).length).toBeLessThanOrEqual(7);
+    // Skill changes hands, so it can only leave the field through CPUs resting.
+    const total = bg.reduce((sum, e) => sum + e.skill, 0);
+    expect(total).toBeLessThanOrEqual(0.4 * bg.length + 1e-9);
+    expect(bg.some((e) => e.skill > 0.4)).toBe(true);
+    expect(bg.some((e) => e.skill < 0.4)).toBe(true);
+    for (const e of bg) expect(Math.abs(e.skill - 0.4)).toBeLessThanOrEqual(3 * MAX_RESULT_CHANGE + 1e-9);
     const roster2 = updateRoster(roster, t);
     for (const e of bg) expect(roster2[e.name]).toBe(e.skill);
   });
@@ -148,7 +153,8 @@ describe('tournament', () => {
     const tired = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.2]));
     const t = createTournament(seeded(42), 0.3, 1, {}, {}, tired);
     expect(t.entrants).toHaveLength(8);
-    // Everyone else was too tired to enter, so they rested: +0.3 and no skill change.
+    // Everyone else was too tired to enter, so they rested: +0.3 energy, and at the
+    // starting skill resting costs nothing.
     expect(t.background).toHaveLength(CPU_NAMES.length - 7);
     for (const b of t.background!) {
       expect(b.energy).toBeCloseTo(0.5);
@@ -172,16 +178,57 @@ describe('tournament', () => {
     expect(cpus.filter((c) => c.skill > 0.3).length).toBeGreaterThan(0);
   });
 
-  it('rolls gains between 0.01 and 0.05 in 0.01 steps, never zero', () => {
-    expect(rollGain(() => 0)).toBe(0.01);
-    expect(rollGain(() => 0.999999)).toBe(0.05);
+  it('lets resting CPUs above the starting skill lose some of it', () => {
+    const tired = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.2]));
+    const strong = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.6]));
+    const t = createTournament(seeded(42), 0.3, 1, strong, {}, tired);
+    for (const b of t.background!) {
+      expect(b.skill).toBeLessThanOrEqual(0.59 + 1e-9);
+      expect(b.skill).toBeGreaterThanOrEqual(0.55 - 1e-9);
+    }
+  });
+
+  it('rolls skip decay between 0.01 and 0.05 in 0.01 steps', () => {
+    expect(rollDecay(() => 0)).toBe(0.01);
+    expect(rollDecay(() => 0.999999)).toBe(0.05);
     const rng = seeded(7);
     const seen = new Set<number>();
-    for (let i = 0; i < 500; i++) seen.add(rollGain(rng));
+    for (let i = 0; i < 500; i++) seen.add(rollDecay(rng));
     expect([...seen].sort()).toEqual([0.01, 0.02, 0.03, 0.04, 0.05]);
   });
 
-  it('advances winners with a random gain and the human to the next round', () => {
+  it('never decays skill below the starting skill', () => {
+    expect(decaySkill(0.5, () => 0)).toBe(0.49);
+    expect(decaySkill(0.5, () => 0.999999)).toBe(0.45);
+    expect(decaySkill(0.32, () => 0.999999)).toBe(TOURNAMENT_START_SKILL);
+    expect(decaySkill(0.3, () => 0.999999)).toBe(0.3);
+    expect(decaySkill(0.22, () => 0.999999)).toBe(0.22);
+  });
+
+  it('moves skill by how surprising the result was', () => {
+    expect(expectedWin(0.4, 0.4)).toBeCloseTo(0.5);
+    expect(expectedWin(0.5, 0.3)).toBeGreaterThan(0.95);
+    // Even players: 0.04 each way.
+    expect(resultChange(0.4, 0.4)).toBe(0.04);
+    // A strong player beating a much weaker one gains almost nothing...
+    expect(resultChange(0.6, 0.3)).toBe(0);
+    expect(resultChange(0.5, 0.4)).toBe(0.01);
+    // ...but the upset the other way moves a lot, capped.
+    expect(resultChange(0.4, 0.5)).toBe(MAX_RESULT_CHANGE);
+    expect(resultChange(0.3, 0.6)).toBe(MAX_RESULT_CHANGE);
+  });
+
+  it('keeps skill within its limits after a result', () => {
+    const rng = seeded(5);
+    const roster = Object.fromEntries(CPU_NAMES.map((n, i) => [n, i % 2 ? MIN_SKILL : MAX_SKILL]));
+    const t = createTournament(rng, MIN_SKILL, 1, roster);
+    for (const e of [...t.entrants, ...t.background!]) {
+      expect(e.skill).toBeGreaterThanOrEqual(MIN_SKILL);
+      expect(e.skill).toBeLessThanOrEqual(MAX_SKILL);
+    }
+  });
+
+  it('advances winners, who take skill from the losers, and the human to the next round', () => {
     const rng = seeded(3);
     const t0 = createTournament(rng);
     const t1 = recordHumanMatch(t0, true, [[4, 2]], rng);
@@ -190,11 +237,10 @@ describe('tournament', () => {
     expect(t1.draws[1]).toHaveLength(4);
     expect(t1.draws[1]).toContain(HUMAN);
     for (const r of t1.results[0]) {
-      const gain = t1.entrants[r.winner].skill - TOURNAMENT_START_SKILL;
-      expect(gain).toBeGreaterThanOrEqual(0.01 - 1e-9);
-      expect(gain).toBeLessThanOrEqual(0.05 + 1e-9);
+      // Everyone started level, so each result moves 0.04 each way.
+      expect(t1.entrants[r.winner].skill).toBeCloseTo(TOURNAMENT_START_SKILL + 0.04);
       const loser = r.players[0] === r.winner ? r.players[1] : r.players[0];
-      expect(t1.entrants[loser].skill).toBe(TOURNAMENT_START_SKILL);
+      expect(t1.entrants[loser].skill).toBeCloseTo(TOURNAMENT_START_SKILL - 0.04);
     }
     const mine = t1.results[0].find((r) => r.players.includes(HUMAN))!;
     expect(mine.score).toBe('4–2');

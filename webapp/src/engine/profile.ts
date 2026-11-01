@@ -97,9 +97,9 @@ export const saveTournamentRecord = (p: Profile, t: Tournament): Profile => {
 
 /**
  * Records a tournament the player sat out: it gets its number and a "skipped"
- * entry, the CPUs keep what they gained, and the player rests.
+ * entry, the CPUs keep their skill changes, and the player rests but loses some skill.
  */
-export const recordSkippedTournament = (p: Profile, cpus: Entrant[], playerSkill: number): Profile => {
+export const recordSkippedTournament = (p: Profile, cpus: Entrant[], startSkill: number, endSkill: number): Profile => {
   const number = p.nextTournament;
   const roster = { ...(p.roster ?? {}) };
   const energy = { ...(p.energy ?? {}) };
@@ -108,7 +108,7 @@ export const recordSkippedTournament = (p: Profile, cpus: Entrant[], playerSkill
     energy[c.name] = c.energy ?? FULL_ENERGY;
   }
   energy.You = restBySkipping(energy.You ?? FULL_ENERGY);
-  const record: TournamentRecord = { number, status: 'skipped', startSkill: playerSkill, endSkill: playerSkill, matches: [] };
+  const record: TournamentRecord = { number, status: 'skipped', startSkill, endSkill, matches: [] };
   return { ...p, roster, energy, nextTournament: number + 1, tournaments: [...p.tournaments, record] };
 };
 

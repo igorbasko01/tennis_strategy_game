@@ -41,6 +41,7 @@ import {
   createTournament,
   currentOpponent,
   currentRound,
+  decaySkill,
   pairings,
   parseTournament,
   playTournamentWithoutPlayer,
@@ -675,8 +676,9 @@ export class App {
       this.storeTournament(next);
       // Skill won in the tournament stays with the player for the next one.
       savePlayerSkill(next.entrants[HUMAN].skill);
-      const gain = next.entrants[HUMAN].skill - before;
-      subtitle = w === 0 ? `${roundName} won · skill +${gain.toFixed(2)}` : `Knocked out in the ${roundName.toLowerCase()}`;
+      const change = next.entrants[HUMAN].skill - before;
+      const skillNote = `skill ${change < 0 ? '−' : '+'}${Math.abs(change).toFixed(2)}`;
+      subtitle = w === 0 ? `${roundName} won · ${skillNote}` : `Knocked out in the ${roundName.toLowerCase()} · ${skillNote}`;
     }
     const el = $('#over');
     el.innerHTML = `
@@ -760,11 +762,15 @@ export class App {
     });
     el.querySelector('[data-act="skip"]')!.addEventListener('click', () => {
       const cpus = playTournamentWithoutPlayer(Math.random, this.profile.roster, this.profile.styles, this.profile.energy);
-      this.profile = recordSkippedTournament(this.profile, cpus, loadPlayerSkill());
+      const startSkill = loadPlayerSkill();
+      const endSkill = decaySkill(startSkill, Math.random);
+      savePlayerSkill(endSkill);
+      this.profile = recordSkippedTournament(this.profile, cpus, startSkill, endSkill);
       saveProfile(this.profile);
       this.tournament = null;
       saveTournament(null);
-      this.renderEntry(`You sat out Tournament #${number} and rested.`);
+      const lost = startSkill - endSkill;
+      this.renderEntry(`You sat out Tournament #${number} and rested${lost > 0 ? ` · skill −${lost.toFixed(2)}` : ''}.`);
     });
     el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
   }
@@ -1014,7 +1020,8 @@ export class App {
         <li>Safe shots (Body, Center Deep) cost less but are easier to read.</li>
         <li>A correctly read drop shot gets a big +0.6 bonus — don't get predictable with it.</li>
         <li>Skill is added to every shot and read. In a practice match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
-        <li>In a tournament the CPUs start at 0.30 and each round won adds a random 0.01–0.05. Your skill carries over from one tournament to the next.</li>
+        <li>In a tournament everyone starts at 0.30 and skill carries over from one tournament to the next. Beating a stronger player gains a lot (up to 0.06); beating a much weaker one gains almost nothing. The loser drops by the same amount.</li>
+        <li>Skipping a tournament costs 0.01–0.05 skill, but never takes you below 0.30.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;
   }
