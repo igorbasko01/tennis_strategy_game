@@ -21,6 +21,8 @@ import {
   resultChange,
   rollDecay,
   simulateMatch,
+  splitTiers,
+  type Entrant,
 } from './tournament';
 
 const seeded = (seed: number) => () => {
@@ -92,6 +94,47 @@ describe('tournament', () => {
     expect(roster.You).toBeUndefined();
     // The champion won three rounds, so they gained (or at least kept) skill.
     expect(t.entrants[champion(t)!].skill).toBeGreaterThanOrEqual(0.3);
+  });
+
+  it('puts the strongest eight entrants in Tier 1 and the rest in Tier 2', () => {
+    const cpus: Entrant[] = CPU_NAMES.map((name, i) => ({ name, skill: 0.6 - i * 0.02 }));
+    const strong: Entrant = { name: 'You', skill: 0.5 };
+    const a = splitTiers([...cpus, strong], strong);
+    expect(a.tier).toBe(1);
+    expect(a.mine.map((e) => e.name)).toEqual(CPU_NAMES.slice(0, 7));
+    expect(a.others.map((e) => e.name)).toEqual(CPU_NAMES.slice(7));
+
+    const weak: Entrant = { name: 'You', skill: 0.25 };
+    const b = splitTiers([...cpus, weak], weak);
+    expect(b.tier).toBe(2);
+    expect(b.mine.map((e) => e.name)).toEqual(CPU_NAMES.slice(8));
+    expect(b.others.map((e) => e.name)).toEqual(CPU_NAMES.slice(0, 8));
+  });
+
+  it('moves the cut-off with who enters, and keeps the player’s draw full', () => {
+    const cpus: Entrant[] = CPU_NAMES.map((name, i) => ({ name, skill: 0.6 - i * 0.02 }));
+    // Ranked 10th of 16, but three of the top players are resting.
+    const you: Entrant = { name: 'You', skill: 0.43 };
+    const entered = [...cpus.slice(3), you];
+    const a = splitTiers(entered, you);
+    expect(a.tier).toBe(1);
+    expect(a.mine).toHaveLength(7);
+    // Ranked 12th of the 13 who entered: Tier 2 is the bottom eight, Tier 1 the five above.
+    const low: Entrant = { name: 'You', skill: 0.33 };
+    const b = splitTiers([...cpus.slice(3), low], low);
+    expect(b.tier).toBe(2);
+    expect(b.mine).toHaveLength(7);
+    expect(b.others.map((e) => e.name)).toEqual(CPU_NAMES.slice(3, 8));
+  });
+
+  it('records which tier the player is in', () => {
+    const roster = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.25]));
+    expect(createTournament(seeded(23), 0.6, 1, roster).tier).toBe(1);
+    const strongRoster = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.6]));
+    expect(createTournament(seeded(24), 0.25, 1, strongRoster).tier).toBe(2);
+    for (const t of [createTournament(seeded(23), 0.6, 1, roster), createTournament(seeded(24), 0.25, 1, strongRoster)]) {
+      expect(t.entrants).toHaveLength(8);
+    }
   });
 
   it('puts every CPU in a draw: seven with the player and the rest in a simultaneous background draw', () => {

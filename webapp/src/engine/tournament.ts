@@ -35,6 +35,12 @@ export const CPU_NAMES = ['Ana', 'Bruno', 'Chen', 'Dara', 'Elio', 'Freya', 'Gora
 /** Players per draw. With 15 CPUs plus the human there are two draws; empty slots are byes. */
 const DRAW_SIZE = 8;
 
+/**
+ * Two draws are played at the same time, filled by skill: Tier 1 takes the
+ * strongest eight players who enter, Tier 2 the rest.
+ */
+export type Tier = 1 | 2;
+
 /** Each player's energy carried between tournaments, by name ('You' for the player). */
 export type Energies = Record<string, number>;
 
@@ -59,9 +65,11 @@ export interface MatchResult {
 
 /** Plain, JSON-serialisable tournament state. Entrant 0 is the human. */
 export interface Tournament {
-  version: 2;
+  version: 3;
   /** Sequential tournament number for the player: 1, 2, 3, ... */
   number: number;
+  /** The draw the human plays in. */
+  tier: Tier;
   /** The human's skill when the tournament began. */
   startSkill: number;
   entrants: Entrant[];
@@ -72,7 +80,7 @@ export interface Tournament {
   status: 'playing' | 'won' | 'lost';
   /**
    * Every CPU not in the player's draw, with its skill and energy afterwards:
-   * those in the simultaneous background draw, and those sitting this one out.
+   * those in the simultaneous draw of the other tier, and those sitting this one out.
    * Not shown to the player.
    */
   background?: Entrant[];
@@ -146,10 +154,30 @@ const loadCpus = (rng: Rng, roster: Roster, styles: Record<string, StyleId>, ene
     }),
   );
 
+/** Highest skill first; equal skills keep their order. */
+const bySkill = (players: Entrant[]) => [...players].sort((a, b) => b.skill - a.skill);
+
+/**
+ * Splits everyone who entered (the human included) into the human's draw and
+ * the other tier's. The top eight are Tier 1; when the human is outside them,
+ * their draw is the bottom eight so it is always full.
+ */
+export const splitTiers = (field: Entrant[], human: Entrant): { tier: Tier; mine: Entrant[]; others: Entrant[] } => {
+  const ranked = bySkill(field);
+  const tier: Tier = ranked.indexOf(human) < DRAW_SIZE ? 1 : 2;
+  const cut = tier === 1 ? DRAW_SIZE : ranked.length - DRAW_SIZE;
+  const [top, bottom] = [ranked.slice(0, cut), ranked.slice(cut)];
+  const [mine, others] = tier === 1 ? [top, bottom] : [bottom, top];
+  return { tier, mine: mine.filter((e) => e !== human), others };
+};
+
 /**
  * Starts the player's next tournament. `humanSkill` and `energies` carry over
- * from earlier tournaments. Seven CPUs join the player's draw; the others play a
- * simultaneous background draw or sit it out to rest.
+ * from earlier tournaments. Everyone who enters is ranked by skill: the top
+ * eight make Tier 1 and the rest Tier 2, so the cut-off moves with who rests.
+ * The player's draw is always full: when the player is in Tier 2 it takes the
+ * bottom eight and Tier 1 is short, with byes. The other tier is played in the
+ * background; CPUs who don't enter rest.
  */
 export const createTournament = (
   rng: Rng = Math.random,
@@ -160,14 +188,19 @@ export const createTournament = (
   energies: Energies = {},
 ): Tournament => {
   const { playing, resting } = chooseEntrants(loadCpus(rng, roster, styles, energies), rng, DRAW_SIZE - 1);
-  const entrants: Entrant[] = [{ name: 'You', skill: humanSkill, energy: energies.You ?? FULL_ENERGY }, ...playing.slice(0, DRAW_SIZE - 1)];
-  const background = [...playKnockout(playing.slice(DRAW_SIZE - 1), rng), ...resting];
+  const human: Entrant = { name: 'You', skill: humanSkill, energy: energies.You ?? FULL_ENERGY };
+  // The player goes in at a random place among equal skills.
+  const field = [...playing];
+  field.splice(Math.floor(rng() * (field.length + 1)), 0, human);
+  const { tier, mine, others } = splitTiers(field, human);
+  const entrants: Entrant[] = [human, ...mine];
+  const background = [...playKnockout(others, rng), ...resting];
   // The human's slot in the draw is random; the bracket pairs neighbours.
   const draw = shuffled(
     entrants.map((_, i) => i),
     rng,
   );
-  return { version: 2, number, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing', background };
+  return { version: 3, number, tier, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing', background };
 };
 
 /**
@@ -207,7 +240,8 @@ const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
 
 /**
  * Plays a whole tournament without the player, who sits it out to rest. Every
- * CPU who enters plays in one of two draws (with byes for any empty slots).
+ * CPU who enters plays in Tier 1 (the strongest eight) or Tier 2 (the rest, with
+ * byes for any empty slots).
  * Returns every CPU with its skill and energy afterwards.
  */
 export const playTournamentWithoutPlayer = (
@@ -217,7 +251,8 @@ export const playTournamentWithoutPlayer = (
   energies: Energies = {},
 ): Entrant[] => {
   const { playing, resting } = chooseEntrants(loadCpus(rng, roster, styles, energies), rng, 0);
-  return [...playKnockout(playing.slice(0, DRAW_SIZE), rng), ...playKnockout(playing.slice(DRAW_SIZE), rng), ...resting];
+  const ranked = bySkill(playing);
+  return [...playKnockout(ranked.slice(0, DRAW_SIZE), rng), ...playKnockout(ranked.slice(DRAW_SIZE), rng), ...resting];
 };
 
 /** Everyone's energy after this tournament, merged into the carried energies. */
@@ -353,7 +388,7 @@ export const updateRoster = (roster: Roster, t: Tournament): Roster => {
 /** Validates state loaded from storage; returns null if it is unusable. */
 export const parseTournament = (raw: unknown): Tournament | null => {
   const t = raw as Tournament;
-  if (!t || t.version !== 2 || typeof t.number !== 'number' || !Array.isArray(t.entrants) || t.entrants.length !== 8) return null;
+  if (!t || t.version !== 3 || (t.tier !== 1 && t.tier !== 2) || typeof t.number !== 'number' || !Array.isArray(t.entrants) || t.entrants.length !== 8) return null;
   if (!Array.isArray(t.draws) || t.draws.length < 1 || t.draws.length > ROUND_NAMES.length) return null;
   if (!Array.isArray(t.results) || !['playing', 'won', 'lost'].includes(t.status)) return null;
   return t;
