@@ -11,7 +11,7 @@ describe('profile', () => {
   it('records a new tournament as in progress under its number', () => {
     const t = createTournament(seeded(1), 0.42, 3);
     const r = summarizeTournament(t);
-    expect(r).toMatchObject({ number: 3, status: 'playing', startSkill: 0.42, endSkill: 0.42, matches: [] });
+    expect(r).toMatchObject({ number: 3, status: 'playing', tier: t.tier, startSkill: 0.42, endSkill: 0.42, matches: [] });
     expect(outcomeLabel(r)).toBe('In progress · Quarterfinal');
   });
 

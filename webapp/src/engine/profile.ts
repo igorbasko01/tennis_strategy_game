@@ -11,6 +11,7 @@ import {
   type Energies,
   type Entrant,
   type Roster,
+  type Tier,
   type Tournament,
 } from './tournament';
 
@@ -30,6 +31,8 @@ export interface TournamentMatchRecord {
 export interface TournamentRecord {
   number: number;
   status: TournamentOutcome;
+  /** The draw the player was in; absent for a skipped tournament. */
+  tier?: Tier;
   startSkill: number;
   endSkill: number;
   matches: TournamentMatchRecord[];
@@ -79,7 +82,7 @@ export const summarizeTournament = (t: Tournament): TournamentRecord => {
       score: won ? mine.score : flipScore(mine.score),
     });
   });
-  return { number: t.number, status: t.status, startSkill: t.startSkill, endSkill: t.entrants[HUMAN].skill, matches };
+  return { number: t.number, status: t.status, tier: t.tier, startSkill: t.startSkill, endSkill: t.entrants[HUMAN].skill, matches };
 };
 
 /** Adds or replaces the record for a tournament, keyed by its number. */
