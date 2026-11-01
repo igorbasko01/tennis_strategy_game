@@ -1,3 +1,5 @@
+import type { Rng } from './resolution';
+import { assignStyles, type StyleId } from './styles';
 import { CPU_NAMES, HUMAN, ROUND_NAMES, TOURNAMENT_START_SKILL, updateRoster, type Roster, type Tournament } from './tournament';
 
 export type TournamentOutcome = 'playing' | 'won' | 'lost';
@@ -29,9 +31,17 @@ export interface Profile {
   tournaments: TournamentRecord[];
   /** CPU players' skills, carried from one tournament to the next. */
   roster?: Roster;
+  /** Each CPU player's playing style, dealt out when the profile is created. */
+  styles?: Record<string, StyleId>;
 }
 
-export const emptyProfile = (): Profile => ({ version: 1, nextTournament: 1, tournaments: [], roster: {} });
+export const emptyProfile = (rng: Rng = Math.random): Profile => ({
+  version: 1,
+  nextTournament: 1,
+  tournaments: [],
+  roster: {},
+  styles: assignStyles(CPU_NAMES, rng),
+});
 
 /** "4–2 6–3" from the winner's side becomes "2–4 3–6". */
 const flipScore = (score: string) =>
@@ -98,6 +108,8 @@ export interface RankingRow {
   name: string;
   skill: number;
   isPlayer: boolean;
+  /** CPU playing style; absent for the player. */
+  style?: StyleId;
 }
 
 /**
@@ -107,7 +119,12 @@ export interface RankingRow {
 export const rankings = (p: Profile, playerSkill: number): RankingRow[] => {
   const rows = [
     { name: 'You', skill: playerSkill, isPlayer: true },
-    ...CPU_NAMES.map((name) => ({ name, skill: p.roster?.[name] ?? TOURNAMENT_START_SKILL, isPlayer: false })),
+    ...CPU_NAMES.map((name) => ({
+      name,
+      skill: p.roster?.[name] ?? TOURNAMENT_START_SKILL,
+      isPlayer: false,
+      style: p.styles?.[name] ?? ('balanced' as StyleId),
+    })),
   ].sort((a, b) => b.skill - a.skill || Number(b.isPlayer) - Number(a.isPlayer) || a.name.localeCompare(b.name));
   return rows.map((row) => ({ ...row, rank: 1 + rows.filter((other) => other.skill > row.skill).length }));
 };
