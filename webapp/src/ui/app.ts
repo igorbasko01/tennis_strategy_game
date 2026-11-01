@@ -14,7 +14,7 @@ import {
   SERVE_RECEIVE_MODIFIER,
 } from '../engine/actions';
 import { AiOpponent } from '../engine/ai';
-import { FULL_ENERGY } from '../engine/energy';
+import { FULL_ENERGY, restBySkipping } from '../engine/energy';
 import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
 import { MATCH_SCORING, type ScoringConfig } from '../engine/scoring';
@@ -24,6 +24,7 @@ import {
   parseProfile,
   profileStats,
   rankings,
+  recordSkippedTournament,
   saveTournamentRecord,
   summarizeTournament,
   type Profile,
@@ -42,6 +43,7 @@ import {
   currentRound,
   pairings,
   parseTournament,
+  playTournamentWithoutPlayer,
   recordHumanMatch,
   type Tournament,
 } from '../engine/tournament';
@@ -259,8 +261,8 @@ export class App {
     menu.querySelector('[data-act="rankings"]')!.addEventListener('click', () => this.renderRankings());
     menu.querySelector('[data-act="tournament"]')!.addEventListener('click', () => {
       this.sound.unlock();
-      if (!this.tournament) this.newTournament();
-      this.renderTournament();
+      if (this.tournament?.status === 'playing') this.renderTournament();
+      else this.renderEntry();
     });
     practice.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
 
@@ -733,9 +735,50 @@ export class App {
     el.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
   }
 
+  /** Before each tournament: enter it, or sit it out to rest. */
+  private renderEntry(note = ''): void {
+    const number = this.profile.nextTournament;
+    const energy = this.profile.energy?.You ?? FULL_ENERGY;
+    const rested = restBySkipping(energy);
+    const el = $('#tournament');
+    el.innerHTML = `
+      <div class="menu-card">
+        <h2>Tournament #${number}</h2>
+        ${note ? `<p class="tagline">${escapeHtml(note)}</p>` : ''}
+        <div class="next-match">
+          <div><span class="setting-label">Your energy</span><b>${Math.round(energy * 100)}%</b></div>
+          <div><span class="setting-label">Your skill</span><b>${loadPlayerSkill().toFixed(2)}</b></div>
+        </div>
+        <button class="primary big" data-act="enter">Enter tournament</button>
+        <button class="ghost" data-act="skip" ${rested <= energy ? 'disabled' : ''}>Skip &amp; rest (energy → ${Math.round(rested * 100)}%)</button>
+        <button class="ghost" data-act="menu">Main menu</button>
+      </div>`;
+    this.showScreen('tournament');
+    el.querySelector('[data-act="enter"]')!.addEventListener('click', () => {
+      this.newTournament();
+      this.renderTournament();
+    });
+    el.querySelector('[data-act="skip"]')!.addEventListener('click', () => {
+      const cpus = playTournamentWithoutPlayer(Math.random, this.profile.roster, this.profile.styles, this.profile.energy);
+      this.profile = recordSkippedTournament(this.profile, cpus, loadPlayerSkill());
+      saveProfile(this.profile);
+      this.tournament = null;
+      saveTournament(null);
+      this.renderEntry(`You sat out Tournament #${number} and rested.`);
+    });
+    el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
+  }
+
   private newTournament(): void {
     this.storeTournament(
-      createTournament(Math.random, loadPlayerSkill(), this.profile.nextTournament, this.profile.roster, this.profile.styles),
+      createTournament(
+        Math.random,
+        loadPlayerSkill(),
+        this.profile.nextTournament,
+        this.profile.roster,
+        this.profile.styles,
+        this.profile.energy,
+      ),
     );
   }
 
@@ -756,6 +799,7 @@ export class App {
         <li class="${r.isPlayer ? 'me' : ''}">
           <span class="rank">${r.rank}</span>
           <span class="nm">${escapeHtml(r.name)}${r.style ? ` <small class="style">${STYLES[r.style].icon} ${STYLES[r.style].label}</small>` : ''}</span>
+          <span class="en">${Math.round(r.energy * 100)}%</span>
           <b class="sk">${r.skill.toFixed(2)}</b>
         </li>`,
       )
@@ -778,7 +822,7 @@ export class App {
     const history = [...this.profile.tournaments]
       .reverse()
       .map((r) => {
-        const tone = r.status === 'won' ? 'won' : r.status === 'lost' ? 'out' : 'live';
+        const tone = r.status === 'won' ? 'won' : r.status === 'playing' ? 'live' : 'out';
         const matches = r.matches
           .map(
             (m) => `
@@ -795,8 +839,12 @@ export class App {
             <h3>Tournament #${r.number}</h3>
             <span class="outcome ${tone}">${r.status === 'won' ? '🏆 ' : ''}${outcomeLabel(r)}</span>
           </div>
-          <p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}</p>
-          ${matches ? `<ul>${matches}</ul>` : '<p class="tbd">No matches played yet</p>'}
+          ${
+            r.status === 'skipped'
+              ? ''
+              : `<p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}</p>
+          ${matches ? `<ul>${matches}</ul>` : '<p class="tbd">No matches played yet</p>'}`
+          }
         </section>`;
       })
       .join('');
@@ -870,7 +918,7 @@ export class App {
           ? `<div class="trophy" aria-hidden="true">🏆</div><p class="tagline">Champion! Final skill ${skill(HUMAN)}</p>`
           : `<p class="tagline">${outcomeLabel(summarizeTournament(t))}${winner === null ? '' : ` · ${name(winner)} won`}</p>`;
       actions = `
-        <button class="primary big" data-act="new">New tournament</button>
+        <button class="primary big" data-act="new">Next tournament</button>
         <button class="ghost" data-act="menu">Main menu</button>`;
     }
 
@@ -902,10 +950,7 @@ export class App {
       this.sound.unlock();
       this.startMatch(this.tournamentSetup());
     });
-    el.querySelector('[data-act="new"]')?.addEventListener('click', () => {
-      this.newTournament();
-      this.renderTournament();
-    });
+    el.querySelector('[data-act="new"]')?.addEventListener('click', () => this.renderEntry());
     el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
   }
 
@@ -943,9 +988,10 @@ export class App {
       a correct read puts you <b>in position</b> (+0.1, or +0.2 after reading a drop shot), and a lucky cover after
       a wrong read leaves you <b>stretched</b> (down to −0.2). Serves always start from a neutral position.</p>
       <h3>Energy</h3>
-      <p>Energy is the bar by each name. Practice matches and every tournament start at full energy, but in a
-      tournament you carry your energy from one round to the next with only a 30% rest in between, so a long match
-      leaves you tired for the next one. Running costs energy: defending,
+      <p>Energy is the bar by each name. Practice matches start at full energy. Tournament energy carries over: from
+      one round to the next and from one tournament to the next, with a 30% rest each time. Before a tournament you can
+      skip it to rest for another 30%, but your rivals keep improving while you are out. CPUs skip when they are below
+      50% energy, and sometimes at random. Running costs energy: defending,
       especially drop shots, and most of all changing direction after a wrong read. You win a little back after
       every point and more at changeovers.</p>
       <p>While you are fresh you can scramble back from a wrong read and recover up to half its penalty, so early

@@ -60,7 +60,7 @@ Shot total: skill \+ action cost \+ position \+ random factor.
 
 ### Energy
 
-Each player has energy from 100% (fresh) to 0% (exhausted). It is full at the start of a practice match and of every tournament. Between tournament matches each player carries their energy over and regains 30% (never above 100%).
+Each player has energy from 100% (fresh) to 0% (exhausted). It is full at the start of a practice match. In tournaments energy carries over, both between matches and between tournaments, and each player regains 30% after every match (never above 100%). A player can skip a tournament to regain another 30%; CPUs skip below 50% energy, and 10% of the time at random. A short field is filled with byes.
 
 1. Spending: defending a shot costs energy by how far it moves the defender (Drop Shot the most, Body and Center Deep the least); a wrong read costs extra, more the worse the read; hitting costs a little.
 2. Recovery: a little after every point, more at each changeover (after every odd game of a set).

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyProfile, outcomeLabel, parseProfile, profileStats, rankings, saveTournamentRecord, summarizeTournament } from './profile';
-import { CPU_NAMES, createTournament, recordHumanMatch } from './tournament';
+import { emptyProfile, outcomeLabel, parseProfile, profileStats, rankings, recordSkippedTournament, saveTournamentRecord, summarizeTournament } from './profile';
+import { CPU_NAMES, createTournament, playTournamentWithoutPlayer, recordHumanMatch } from './tournament';
 
 const seeded = (seed: number) => () => {
   seed = (seed * 1664525 + 1013904223) % 4294967296;
@@ -75,6 +75,21 @@ describe('profile', () => {
     // Everyone not in the roster yet is at the starting skill, tied for 4th.
     expect(rows.slice(3).every((r) => r.skill === 0.3 && r.rank === 4)).toBe(true);
     expect(rows.filter((r) => r.isPlayer)).toHaveLength(1);
+  });
+
+  it('records a skipped tournament: the player rests and the CPUs move on', () => {
+    const rng = seeded(8);
+    const p0 = { ...emptyProfile(rng), nextTournament: 4, energy: { You: 0.5 } };
+    const cpus = playTournamentWithoutPlayer(rng);
+    const p1 = recordSkippedTournament(p0, cpus, 0.42);
+    expect(p1.nextTournament).toBe(5);
+    expect(p1.energy!.You).toBeCloseTo(0.8);
+    const r = p1.tournaments[p1.tournaments.length - 1];
+    expect(r).toMatchObject({ number: 4, status: 'skipped', startSkill: 0.42, endSkill: 0.42, matches: [] });
+    expect(outcomeLabel(r)).toBe('Skipped to rest');
+    for (const c of cpus) expect(p1.roster![c.name]).toBe(c.skill);
+    expect(profileStats(p1).tournaments).toBe(0);
+    expect(rankings(p1, 0.42).find((x) => x.isPlayer)!.energy).toBeCloseTo(0.8);
   });
 
   it('survives a JSON round trip and rejects junk', () => {

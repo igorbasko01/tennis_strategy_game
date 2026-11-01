@@ -33,6 +33,16 @@ export const CHANGEOVER_RECOVERY = 0.08;
 /** Energy regained between two matches of a tournament; it never refills completely. */
 export const BETWEEN_MATCH_RECOVERY = 0.3;
 
+/** Extra energy regained by sitting out a tournament, on top of the usual rest. */
+export const SKIP_RECOVERY = 0.3;
+
+/** A CPU sits out a tournament below this energy, or at random with this chance. */
+export const CPU_REST_THRESHOLD = 0.5;
+export const CPU_RANDOM_REST = 0.1;
+
+/** Energy after sitting out a tournament. */
+export const restBySkipping = (energy: number): number => round3(clamp(energy + SKIP_RECOVERY));
+
 /** Energy a player carries into their next tournament match. */
 export const restBetweenMatches = (energy: number): number => round3(clamp(energy + BETWEEN_MATCH_RECOVERY));
 

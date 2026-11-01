@@ -1127,7 +1127,7 @@ td.neg {
 
 .ranking li {
   display: grid;
-  grid-template-columns: 32px 1fr auto;
+  grid-template-columns: 32px 1fr auto auto;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
@@ -1142,6 +1142,12 @@ td.neg {
 }
 
 .ranking .sk {
+  font-variant-numeric: tabular-nums;
+}
+
+.ranking .en {
+  font-size: 13px;
+  color: var(--energy);
   font-variant-numeric: tabular-nums;
 }
 

@@ -9,7 +9,7 @@ first (portrait and landscape), with tablets and desktops also supported.
 - Simultaneous bundled decisions: pick a **target** and a **read** each exchange; the choices are revealed together.
 - Serve phase (Wide / Body / T-Line vs. Wide / Neutral / T-Line reads) and rally phase (Cross-Court / Down the Line / Center Deep / Drop Shot).
 - Resolution that follows the design: `skill + action modifier + random(-0.3..0.3)`, shown in a per-shot breakdown.
-- Energy: running drains it and it recovers between points and at changeovers. In a tournament it carries from one round to the next with a 30% rest in between. Fresh players can scramble back from a wrong read; tired ones lose up to 0.15 on every shot and read.
+- Energy: running drains it and it recovers between points and at changeovers. In tournaments it carries over, round to round and tournament to tournament, with a 30% rest after each match; you can skip a tournament to rest another 30% (CPUs skip when tired or at random). Fresh players can scramble back from a wrong read; tired ones lose up to 0.15 on every shot and read.
 - Every match is the best of three games: the first to win two games wins.
 - Tennis scoring within each game (15/30/40, deuce and advantage), with the serve alternating every game.
 - **Practice match:** pick your skill and the CPU's from five tiers (Beginner 0.3, Club 0.4, Pro 0.5, Elite 0.6, Legend 0.7).
