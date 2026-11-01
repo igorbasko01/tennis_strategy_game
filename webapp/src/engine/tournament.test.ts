@@ -109,6 +109,32 @@ describe('tournament', () => {
     for (const e of bg) expect(roster2[e.name]).toBe(e.skill);
   });
 
+  it('starts every tournament at full energy and carries energy plus a 30% rest into the next round', () => {
+    const rng = seeded(31);
+    const t0 = createTournament(rng);
+    expect(t0.entrants.every((e) => (e.energy ?? 1) === 1)).toBe(true);
+    const opp = currentOpponent(t0)!;
+    const t1 = recordHumanMatch(t0, true, [[2, 1]], rng, [0.42, 0.55]);
+    expect(t1.entrants[HUMAN].energy).toBeCloseTo(0.72);
+    expect(t1.entrants[opp].energy).toBeCloseTo(0.85);
+    // Simulated players also come out of their matches below full energy (before the rest).
+    for (const r of t1.results[0]) {
+      if (r.players.includes(HUMAN)) continue;
+      for (const p of r.players) expect(t1.entrants[p].energy).toBeLessThanOrEqual(1);
+    }
+    expect(t1.entrants.some((e, i) => i !== HUMAN && (e.energy ?? 1) < 1)).toBe(true);
+  });
+
+  it('never rests a player above full energy', () => {
+    const t = recordHumanMatch(createTournament(seeded(32)), true, [[2, 0]], seeded(33), [0.9, 0.95]);
+    expect(t.entrants[HUMAN].energy).toBe(1);
+  });
+
+  it('starts simulated matches from the energy given', () => {
+    const tired = simulateMatch([0.3, 0.3], seeded(34), [undefined, undefined], [0.2, 0.2]);
+    expect(Math.max(...tired.energy)).toBeLessThan(0.6);
+  });
+
   it('rolls gains between 0.00 and 0.05 in 0.01 steps', () => {
     expect(rollGain(() => 0)).toBe(0);
     expect(rollGain(() => 0.999999)).toBe(0.05);

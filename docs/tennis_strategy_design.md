@@ -60,7 +60,7 @@ Shot total: skill \+ action cost \+ position \+ random factor.
 
 ### Energy
 
-Each player has energy from 100% (fresh) to 0% (exhausted), full at the start of every match.
+Each player has energy from 100% (fresh) to 0% (exhausted). It is full at the start of a practice match and of every tournament. Between tournament matches each player carries their energy over and regains 30% (never above 100%).
 
 1. Spending: defending a shot costs energy by how far it moves the defender (Drop Shot the most, Body and Center Deep the least); a wrong read costs extra, more the worse the read; hitting costs a little.
 2. Recovery: a little after every point, more at each changeover (after every odd game of a set).
