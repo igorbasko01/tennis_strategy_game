@@ -2,6 +2,7 @@ import { AiOpponent } from './ai';
 import { Match } from './match';
 import type { Rng } from './resolution';
 import { MATCH_SCORING, type ScoringConfig } from './scoring';
+import { STYLES, type StyleId } from './styles';
 
 /** Starting skill for CPU entrants, and for a human with no saved skill yet. */
 export const TOURNAMENT_START_SKILL = 0.3;
@@ -18,6 +19,8 @@ const DRAW_SIZE = 8;
 export interface Entrant {
   name: string;
   skill: number;
+  /** CPU playing style; absent for the human. */
+  style?: StyleId;
 }
 
 export interface MatchResult {
@@ -73,9 +76,12 @@ export const createTournament = (
   humanSkill = TOURNAMENT_START_SKILL,
   number = 1,
   roster: Roster = {},
+  styles: Record<string, StyleId> = {},
 ): Tournament => {
   // Every CPU plays: 7 join the player's draw and the rest play the other draw at the same time.
-  const cpus = shuffled(CPU_NAMES, rng).map((name) => ({ name, skill: roster[name] ?? TOURNAMENT_START_SKILL }));
+  const cpus = shuffled(CPU_NAMES, rng).map(
+    (name): Entrant => ({ name, skill: roster[name] ?? TOURNAMENT_START_SKILL, style: styles[name] ?? 'balanced' }),
+  );
   const entrants: Entrant[] = [{ name: 'You', skill: humanSkill }, ...cpus.slice(0, DRAW_SIZE - 1)];
   const background = playKnockout(cpus.slice(DRAW_SIZE - 1), rng);
   // The human's slot in the draw is random; the bracket pairs neighbours.
@@ -97,7 +103,7 @@ const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
     const winners: number[] = [];
     for (let i = 0; i < alive.length; i += 2) {
       const pair = [alive[i], alive[i + 1]];
-      const sim = simulateMatch([out[pair[0]].skill, out[pair[1]].skill], rng);
+      const sim = simulateMatch([out[pair[0]].skill, out[pair[1]].skill], rng, [out[pair[0]].style, out[pair[1]].style]);
       const w = out[pair[sim.winner]];
       w.skill = Math.min(MAX_SKILL, round2(w.skill + rollGain(rng)));
       winners.push(pair[sim.winner]);
@@ -126,7 +132,12 @@ export const currentOpponent = (t: Tournament): number | null => {
 };
 
 /** Plays a whole CPU-vs-CPU match and returns the winner's side and the set score. */
-export const simulateMatch = (skills: readonly [number, number], rng: Rng, scoring: ScoringConfig = MATCH_SCORING) => {
+export const simulateMatch = (
+  skills: readonly [number, number],
+  rng: Rng,
+  styles: readonly [StyleId | undefined, StyleId | undefined] = [undefined, undefined],
+  scoring: ScoringConfig = MATCH_SCORING,
+) => {
   const m = new Match(
     [
       { name: 'A', skill: skills[0] },
@@ -135,10 +146,10 @@ export const simulateMatch = (skills: readonly [number, number], rng: Rng, scori
     scoring,
     rng() < 0.5 ? 0 : 1,
   );
-  const ai = new AiOpponent(rng);
+  const ai = styles.map((s) => new AiOpponent(rng, s && STYLES[s]));
   while (!m.isOver) {
-    m.submit(0, ai.choose(m, 0));
-    m.submit(1, ai.choose(m, 1));
+    m.submit(0, ai[0].choose(m, 0));
+    m.submit(1, ai[1].choose(m, 1));
     m.resolve(rng);
   }
   const winner = m.score.winner!;
@@ -181,7 +192,7 @@ const playRound = (t: Tournament, rng: Rng, human?: { won: boolean; sets: [numbe
       const winner = human.won ? HUMAN : opponent;
       results.push({ players: pair, winner, score: scoreLabel(human.sets, human.won ? 0 : 1), skills });
     } else {
-      const sim = simulateMatch(skills, rng);
+      const sim = simulateMatch(skills, rng, [t.entrants[pair[0]].style, t.entrants[pair[1]].style]);
       results.push({ players: pair, winner: pair[sim.winner], score: scoreLabel(sim.sets, sim.winner), skills });
     }
   }

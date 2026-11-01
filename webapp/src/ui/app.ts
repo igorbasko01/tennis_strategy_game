@@ -28,7 +28,9 @@ import {
   type Profile,
 } from '../engine/profile';
 import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
+import { STYLES, STYLE_IDS, assignStyles, type StyleId } from '../engine/styles';
 import {
+  CPU_NAMES,
   HUMAN,
   MAX_SKILL,
   champion,
@@ -126,7 +128,13 @@ const PROFILE_KEY = 'tennis-strategy-profile';
 const loadProfile = (): Profile => {
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
-    return (raw && parseProfile(JSON.parse(raw))) || emptyProfile();
+    const profile = (raw && parseProfile(JSON.parse(raw))) || emptyProfile();
+    // Profiles saved before CPU styles existed get theirs dealt once.
+    if (!profile.styles) {
+      profile.styles = assignStyles(CPU_NAMES, Math.random);
+      saveProfile(profile);
+    }
+    return profile;
   } catch {
     return emptyProfile();
   }
@@ -146,6 +154,8 @@ interface MatchSetup {
   skills: [number, number];
   scoring: ScoringConfig;
   tournament: boolean;
+  /** How the CPU opponent plays. */
+  cpuStyle: StyleId;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -203,7 +213,7 @@ export class App {
   private readonly scene: CourtScene;
   private readonly sound = new Sound();
   private match: Match | null = null;
-  private readonly ai = new AiOpponent();
+  private ai = new AiOpponent();
   private names: [string, string] = ['You', 'CPU'];
   private setup: MatchSetup | null = null;
   private tournament = loadTournament();
@@ -302,6 +312,7 @@ export class App {
       skills: [skillTier(this.settings.playerSkill)!.skill, skillTier(this.settings.cpuSkill)!.skill],
       scoring: MATCH_SCORING,
       tournament: false,
+      cpuStyle: 'balanced',
     };
   }
 
@@ -312,6 +323,7 @@ export class App {
     this.setup = setup;
     this.names = setup.names;
     const firstServer: PlayerIndex = Math.random() < 0.5 ? 0 : 1;
+    this.ai = new AiOpponent(Math.random, STYLES[setup.cpuStyle]);
     this.match = new Match(
       [
         { name: setup.names[0], skill: setup.skills[0] },
@@ -717,7 +729,9 @@ export class App {
   }
 
   private newTournament(): void {
-    this.storeTournament(createTournament(Math.random, loadPlayerSkill(), this.profile.nextTournament, this.profile.roster));
+    this.storeTournament(
+      createTournament(Math.random, loadPlayerSkill(), this.profile.nextTournament, this.profile.roster, this.profile.styles),
+    );
   }
 
   /** Saves the tournament and its entry in the player's history. */
@@ -736,7 +750,7 @@ export class App {
         (r) => `
         <li class="${r.isPlayer ? 'me' : ''}">
           <span class="rank">${r.rank}</span>
-          <span class="nm">${escapeHtml(r.name)}</span>
+          <span class="nm">${escapeHtml(r.name)}${r.style ? ` <small class="style">${STYLES[r.style].icon} ${STYLES[r.style].label}</small>` : ''}</span>
           <b class="sk">${r.skill.toFixed(2)}</b>
         </li>`,
       )
@@ -806,6 +820,7 @@ export class App {
       skills: [t.entrants[HUMAN].skill, opp.skill],
       scoring: MATCH_SCORING,
       tournament: true,
+      cpuStyle: opp.style ?? 'balanced',
     };
   }
 
@@ -814,6 +829,18 @@ export class App {
     const round = currentRound(t);
     const name = (i: number) => escapeHtml(t.entrants[i].name);
     const skill = (i: number) => t.entrants[i].skill.toFixed(2);
+    const styleOf = (i: number) => {
+      const id = t.entrants[i].style;
+      return id ? STYLES[id] : null;
+    };
+    const styleIcon = (i: number) => {
+      const s = styleOf(i);
+      return s ? ` <span class="style-icon" title="${s.label}" aria-label="${s.label}">${s.icon}</span>` : '';
+    };
+    const styleTag = (i: number) => {
+      const s = styleOf(i);
+      return s ? `<small class="style">${s.icon} ${s.label}</small>` : '';
+    };
 
     let head: string;
     let actions: string;
@@ -824,7 +851,7 @@ export class App {
         <div class="next-match">
           <div><span class="player-chip p0">You</span><b>${skill(HUMAN)}</b></div>
           <span class="vs">vs</span>
-          <div><span class="player-chip p1">${name(opp)}</span><b>${skill(opp)}</b></div>
+          <div><span class="player-chip p1">${name(opp)}</span><b>${skill(opp)}</b>${styleTag(opp)}</div>
         </div>`;
       actions = `
         <button class="primary big" data-act="play">Play ${ROUND_NAMES[round].toLowerCase()}</button>
@@ -848,7 +875,7 @@ export class App {
           const res = results?.[i];
           // Played matches show the skill each player had at the time; upcoming ones their current skill.
           const cell = (p: number, side: 0 | 1) =>
-            `<span class="${res ? (res.winner === p ? 'won' : 'lost') : ''} ${p === HUMAN ? 'me' : ''}"><span class="nm">${name(p)}</span> <small class="sk">${(res ? res.skills[side] : t.entrants[p].skill).toFixed(2)}</small></span>`;
+            `<span class="${res ? (res.winner === p ? 'won' : 'lost') : ''} ${p === HUMAN ? 'me' : ''}"><span class="nm">${name(p)}</span>${styleIcon(p)} <small class="sk">${(res ? res.skills[side] : t.entrants[p].skill).toFixed(2)}</small></span>`;
           return `<li>${cell(pair[0], 0)}<span class="vs">vs</span>${cell(pair[1], 1)}<span class="score">${res ? res.score : ''}</span></li>`;
         })
         .join('');
@@ -917,6 +944,10 @@ export class App {
       <p>In the shot breakdown the purple <b>energy</b> term combines both: a plus means a scramble saved part of a
       wrong read (the read is marked “scrambled”), a minus means fatigue. The energy a misread costs shows in the
       bar by your name.</p>
+      <h3>CPU styles</h3>
+      <p>Every CPU player has a style it always plays with. It doesn't learn from you, but it leans on its favourite
+      choices, so watch what your opponent does and adapt. Styles are dealt out again when you start fresh.</p>
+      <ul>${STYLE_IDS.map((id) => `<li>${STYLES[id].icon} <b>${STYLES[id].label}</b>: ${STYLES[id].description}</li>`).join('')}</ul>
       <h3>Serve vs. read</h3>
       <p class="small">Rows: serve (risk). Columns: receiver's read.</p>
       ${serveTable}

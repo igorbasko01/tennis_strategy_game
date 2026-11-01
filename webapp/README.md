@@ -16,7 +16,7 @@ first (portrait and landscape), with tablets and desktops also supported.
 - **Tournament:** an 8-player knockout (quarterfinal, semifinal, final), each match the best of three games. Every player starts at skill 0.30 and every round won adds a random 0.00–0.05. Skills are saved and carry over: yours, and those of the 15 CPU players. Every tournament runs two 8-player draws at the same time: you play in one and the other is played out in the background, so every CPU plays every tournament. If you are knocked out, the rest of the draw is played out so every tournament has a champion. Progress is saved in the browser between matches. Tournaments are numbered (#1, #2, …).
 - **Profile:** your skill, tournaments played, titles and match record, plus every tournament with its result and each match you played in it. **Settings → Start fresh** wipes skill and history.
 - **Rankings:** every player (you and the 14 CPUs) ranked by skill. The tournament bracket shows each player's skill too.
-- The CPU currently picks every decision at random; smarter behaviour will come later.
+- **CPU styles:** every CPU player has a visible playing style with fixed tendencies and no memory: 🧱 Grinder, ⚡ Aggressor, 🪶 Touch player or ⚖️ Balanced (a game-theory mix). Styles are dealt out evenly and reshuffled when you start fresh. Practice matches use a Balanced CPU.
 - 3D court with animated players and ball. You can tap the zones on the court as well as the buttons.
 
 ## Develop
@@ -39,7 +39,8 @@ src/
 │   ├── scoring.ts    # Points / games / sets / tiebreaks
 │   ├── match.ts      # Turn flow, choice collection, stats
 │   ├── energy.ts     # Energy costs, recovery, fatigue and scramble
-│   ├── ai.ts         # CPU opponent (random choices)
+│   ├── ai.ts         # CPU opponent (picks from its style's percentages)
+│   ├── styles.ts     # CPU playing styles
 │   ├── skill.ts      # Practice-match skill tiers
 │   ├── profile.ts    # Tournament history and profile stats
 │   └── tournament.ts # Knockout bracket, skill gains, CPU-vs-CPU simulation

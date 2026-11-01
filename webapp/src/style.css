@@ -1154,3 +1154,22 @@ td.neg {
   color: var(--lime);
   font-weight: 800;
 }
+
+/* ------------------------------------------------------------ CPU styles */
+
+.style {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.ranking .style {
+  display: inline;
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.style-icon {
+  font-size: 12px;
+}
