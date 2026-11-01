@@ -30,6 +30,12 @@ const HIT_COST = 0.006;
 export const POINT_RECOVERY = 0.02;
 export const CHANGEOVER_RECOVERY = 0.08;
 
+/** Energy regained between two matches of a tournament; it never refills completely. */
+export const BETWEEN_MATCH_RECOVERY = 0.3;
+
+/** Energy a player carries into their next tournament match. */
+export const restBetweenMatches = (energy: number): number => round3(clamp(energy + BETWEEN_MATCH_RECOVERY));
+
 const round2 = (n: number) => Math.round(n * 100) / 100 || 0;
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const clamp = (n: number) => Math.min(FULL_ENERGY, Math.max(0, n));

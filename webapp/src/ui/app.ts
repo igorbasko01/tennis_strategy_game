@@ -14,6 +14,7 @@ import {
   SERVE_RECEIVE_MODIFIER,
 } from '../engine/actions';
 import { AiOpponent } from '../engine/ai';
+import { FULL_ENERGY } from '../engine/energy';
 import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
 import { MATCH_SCORING, type ScoringConfig } from '../engine/scoring';
@@ -156,6 +157,8 @@ interface MatchSetup {
   tournament: boolean;
   /** How the CPU opponent plays. */
   cpuStyle: StyleId;
+  /** Energy going in: [player, CPU]. Tournament matches carry it from the previous round. */
+  energy: [number, number];
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -313,6 +316,7 @@ export class App {
       scoring: MATCH_SCORING,
       tournament: false,
       cpuStyle: 'balanced',
+      energy: [FULL_ENERGY, FULL_ENERGY],
     };
   }
 
@@ -331,6 +335,7 @@ export class App {
       ],
       setup.scoring,
       firstServer,
+      setup.energy,
     );
     this.showScreen(null);
     this.scene.animator.speed = 1;
@@ -664,7 +669,7 @@ export class App {
       const t = this.tournament!;
       const roundName = ROUND_NAMES[currentRound(t)];
       const before = t.entrants[HUMAN].skill;
-      const next = recordHumanMatch(t, w === 0, m.score.completedSets);
+      const next = recordHumanMatch(t, w === 0, m.score.completedSets, Math.random, m.energy);
       this.storeTournament(next);
       // Skill won in the tournament stays with the player for the next one.
       savePlayerSkill(next.entrants[HUMAN].skill);
@@ -821,6 +826,7 @@ export class App {
       scoring: MATCH_SCORING,
       tournament: true,
       cpuStyle: opp.style ?? 'balanced',
+      energy: [t.entrants[HUMAN].energy ?? FULL_ENERGY, t.entrants[currentOpponent(t)!].energy ?? FULL_ENERGY],
     };
   }
 
@@ -837,6 +843,7 @@ export class App {
       const s = styleOf(i);
       return s ? ` <span class="style-icon" title="${s.label}" aria-label="${s.label}">${s.icon}</span>` : '';
     };
+    const energyTag = (i: number) => `<small class="energy-tag">${Math.round((t.entrants[i].energy ?? FULL_ENERGY) * 100)}% energy</small>`;
     const styleTag = (i: number) => {
       const s = styleOf(i);
       return s ? `<small class="style">${s.icon} ${s.label}</small>` : '';
@@ -849,9 +856,9 @@ export class App {
       head = `
         <p class="tagline">${ROUND_NAMES[round]}</p>
         <div class="next-match">
-          <div><span class="player-chip p0">You</span><b>${skill(HUMAN)}</b></div>
+          <div><span class="player-chip p0">You</span><b>${skill(HUMAN)}</b>${energyTag(HUMAN)}</div>
           <span class="vs">vs</span>
-          <div><span class="player-chip p1">${name(opp)}</span><b>${skill(opp)}</b>${styleTag(opp)}</div>
+          <div><span class="player-chip p1">${name(opp)}</span><b>${skill(opp)}</b>${energyTag(opp)}${styleTag(opp)}</div>
         </div>`;
       actions = `
         <button class="primary big" data-act="play">Play ${ROUND_NAMES[round].toLowerCase()}</button>
@@ -936,7 +943,9 @@ export class App {
       a correct read puts you <b>in position</b> (+0.1, or +0.2 after reading a drop shot), and a lucky cover after
       a wrong read leaves you <b>stretched</b> (down to −0.2). Serves always start from a neutral position.</p>
       <h3>Energy</h3>
-      <p>Both players start every match with full energy (the bar by each name). Running costs energy: defending,
+      <p>Energy is the bar by each name. Practice matches and every tournament start at full energy, but in a
+      tournament you carry your energy from one round to the next with only a 30% rest in between, so a long match
+      leaves you tired for the next one. Running costs energy: defending,
       especially drop shots, and most of all changing direction after a wrong read. You win a little back after
       every point and more at changeovers.</p>
       <p>While you are fresh you can scramble back from a wrong read and recover up to half its penalty, so early

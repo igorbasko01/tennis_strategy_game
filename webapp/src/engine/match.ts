@@ -70,12 +70,19 @@ export class Match {
   energy: [number, number] = [FULL_ENERGY, FULL_ENERGY];
   private choices: [Choice | null, Choice | null] = [null, null];
 
-  constructor(players: readonly [PlayerConfig, PlayerConfig], scoring: ScoringConfig, firstServer: PlayerIndex = 0) {
+  /** `energy` is each player's energy going in; matches start fresh unless given. */
+  constructor(
+    players: readonly [PlayerConfig, PlayerConfig],
+    scoring: ScoringConfig,
+    firstServer: PlayerIndex = 0,
+    energy: readonly [number, number] = [FULL_ENERGY, FULL_ENERGY],
+  ) {
     for (const p of players) {
       if (p.skill < 0 || p.skill > 1) throw new Error('Skill must be between 0.0 and 1.0');
     }
     this.players = players;
     this.score = new Score(scoring, firstServer);
+    this.energy = [energy[0], energy[1]];
   }
 
   get server(): PlayerIndex {

@@ -1,6 +1,7 @@
 import { AiOpponent } from './ai';
 import { Match } from './match';
 import type { Rng } from './resolution';
+import { FULL_ENERGY, restBetweenMatches } from './energy';
 import { MATCH_SCORING, type ScoringConfig } from './scoring';
 import { STYLES, type StyleId } from './styles';
 
@@ -21,6 +22,8 @@ export interface Entrant {
   skill: number;
   /** CPU playing style; absent for the human. */
   style?: StyleId;
+  /** Energy going into this player's next match of the tournament (0-1); full when absent. */
+  energy?: number;
 }
 
 export interface MatchResult {
@@ -103,7 +106,12 @@ const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
     const winners: number[] = [];
     for (let i = 0; i < alive.length; i += 2) {
       const pair = [alive[i], alive[i + 1]];
-      const sim = simulateMatch([out[pair[0]].skill, out[pair[1]].skill], rng, [out[pair[0]].style, out[pair[1]].style]);
+      const sim = simulateMatch([out[pair[0]].skill, out[pair[1]].skill], rng, [out[pair[0]].style, out[pair[1]].style], [
+        out[pair[0]].energy ?? FULL_ENERGY,
+        out[pair[1]].energy ?? FULL_ENERGY,
+      ]);
+      out[pair[0]].energy = restBetweenMatches(sim.energy[0]);
+      out[pair[1]].energy = restBetweenMatches(sim.energy[1]);
       const w = out[pair[sim.winner]];
       w.skill = Math.min(MAX_SKILL, round2(w.skill + rollGain(rng)));
       winners.push(pair[sim.winner]);
@@ -136,6 +144,7 @@ export const simulateMatch = (
   skills: readonly [number, number],
   rng: Rng,
   styles: readonly [StyleId | undefined, StyleId | undefined] = [undefined, undefined],
+  energy: readonly [number, number] = [FULL_ENERGY, FULL_ENERGY],
   scoring: ScoringConfig = MATCH_SCORING,
 ) => {
   const m = new Match(
@@ -145,6 +154,7 @@ export const simulateMatch = (
     ],
     scoring,
     rng() < 0.5 ? 0 : 1,
+    energy,
   );
   const ai = styles.map((s) => new AiOpponent(rng, s && STYLES[s]));
   while (!m.isOver) {
@@ -153,7 +163,7 @@ export const simulateMatch = (
     m.resolve(rng);
   }
   const winner = m.score.winner!;
-  return { winner, sets: m.score.completedSets };
+  return { winner, sets: m.score.completedSets, energy: m.energy };
 };
 
 const scoreLabel = (sets: [number, number][], winnerSide: 0 | 1) =>
@@ -162,12 +172,19 @@ const scoreLabel = (sets: [number, number][], winnerSide: 0 | 1) =>
 /**
  * Records the human's match in the current round, simulates the other matches,
  * gives every winner a random skill gain, and advances the draw.
- * `sets` are the completed set scores with the human's games first.
+ * `sets` are the completed set scores with the human's games first; `energy` is
+ * [human, opponent] energy at the end of the match.
  */
-export const recordHumanMatch = (t: Tournament, humanWon: boolean, sets: [number, number][], rng: Rng = Math.random): Tournament => {
+export const recordHumanMatch = (
+  t: Tournament,
+  humanWon: boolean,
+  sets: [number, number][],
+  rng: Rng = Math.random,
+  energy: readonly [number, number] = [FULL_ENERGY, FULL_ENERGY],
+): Tournament => {
   if (t.status !== 'playing') throw new Error('Tournament is over');
   const next: Tournament = structuredClone(t);
-  playRound(next, rng, { won: humanWon, sets });
+  playRound(next, rng, { won: humanWon, sets, energy });
   if (!humanWon) {
     next.status = 'lost';
     // The CPUs still in the draw play on, so every tournament has a champion.
@@ -182,7 +199,11 @@ export const recordHumanMatch = (t: Tournament, humanWon: boolean, sets: [number
  * Plays the current round in place: the human's match uses `human`, every other
  * match is simulated. Winners gain skill and, unless it was the final, advance.
  */
-const playRound = (t: Tournament, rng: Rng, human?: { won: boolean; sets: [number, number][] }): void => {
+const playRound = (
+  t: Tournament,
+  rng: Rng,
+  human?: { won: boolean; sets: [number, number][]; energy: readonly [number, number] },
+): void => {
   const round = currentRound(t);
   const results: MatchResult[] = [];
   for (const pair of pairings(t, round)) {
@@ -191,8 +212,13 @@ const playRound = (t: Tournament, rng: Rng, human?: { won: boolean; sets: [numbe
       const opponent = pair[0] === HUMAN ? pair[1] : pair[0];
       const winner = human.won ? HUMAN : opponent;
       results.push({ players: pair, winner, score: scoreLabel(human.sets, human.won ? 0 : 1), skills });
+      t.entrants[HUMAN].energy = restBetweenMatches(human.energy[0]);
+      t.entrants[opponent].energy = restBetweenMatches(human.energy[1]);
     } else {
-      const sim = simulateMatch(skills, rng, [t.entrants[pair[0]].style, t.entrants[pair[1]].style]);
+      const [a, b] = [t.entrants[pair[0]], t.entrants[pair[1]]];
+      const sim = simulateMatch(skills, rng, [a.style, b.style], [a.energy ?? FULL_ENERGY, b.energy ?? FULL_ENERGY]);
+      a.energy = restBetweenMatches(sim.energy[0]);
+      b.energy = restBetweenMatches(sim.energy[1]);
       results.push({ players: pair, winner: pair[sim.winner], score: scoreLabel(sim.sets, sim.winner), skills });
     }
   }
