@@ -8,7 +8,8 @@ import { STYLES, type StyleId } from './styles';
 /** Starting skill for CPU entrants, and for a human with no saved skill yet. */
 export const TOURNAMENT_START_SKILL = 0.3;
 export const MAX_SKILL = 1;
-/** Each round a player wins adds a random gain of 0.00-0.05, in 0.01 steps. */
+/** Each round a player wins adds a random gain of 0.01-0.05, in 0.01 steps. */
+export const TOURNAMENT_MIN_GAIN = 0.01;
 export const TOURNAMENT_MAX_GAIN = 0.05;
 export const ROUND_NAMES = ['Quarterfinal', 'Semifinal', 'Final'] as const;
 export const HUMAN = 0;
@@ -67,8 +68,11 @@ const shuffled = <T>(items: readonly T[], rng: Rng): T[] => {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** A random skill gain of 0.00-0.05 in 0.01 steps, each equally likely. */
-export const rollGain = (rng: Rng): number => Math.floor(rng() * (TOURNAMENT_MAX_GAIN * 100 + 1)) / 100;
+/** A random skill gain of 0.01-0.05 in 0.01 steps, each equally likely. */
+export const rollGain = (rng: Rng): number => {
+  const steps = Math.round((TOURNAMENT_MAX_GAIN - TOURNAMENT_MIN_GAIN) * 100) + 1;
+  return Math.round(TOURNAMENT_MIN_GAIN * 100 + Math.floor(rng() * steps)) / 100;
+};
 
 /** `humanSkill` is the skill the player has carried over from earlier tournaments. */
 /** CPU players' skills carried over from earlier tournaments, by name. */

@@ -135,13 +135,13 @@ describe('tournament', () => {
     expect(Math.max(...tired.energy)).toBeLessThan(0.6);
   });
 
-  it('rolls gains between 0.00 and 0.05 in 0.01 steps', () => {
-    expect(rollGain(() => 0)).toBe(0);
+  it('rolls gains between 0.01 and 0.05 in 0.01 steps, never zero', () => {
+    expect(rollGain(() => 0)).toBe(0.01);
     expect(rollGain(() => 0.999999)).toBe(0.05);
     const rng = seeded(7);
     const seen = new Set<number>();
     for (let i = 0; i < 500; i++) seen.add(rollGain(rng));
-    expect([...seen].sort()).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect([...seen].sort()).toEqual([0.01, 0.02, 0.03, 0.04, 0.05]);
   });
 
   it('advances winners with a random gain and the human to the next round', () => {
@@ -154,7 +154,7 @@ describe('tournament', () => {
     expect(t1.draws[1]).toContain(HUMAN);
     for (const r of t1.results[0]) {
       const gain = t1.entrants[r.winner].skill - TOURNAMENT_START_SKILL;
-      expect(gain).toBeGreaterThanOrEqual(0);
+      expect(gain).toBeGreaterThanOrEqual(0.01 - 1e-9);
       expect(gain).toBeLessThanOrEqual(0.05 + 1e-9);
       const loser = r.players[0] === r.winner ? r.players[1] : r.players[0];
       expect(t1.entrants[loser].skill).toBe(TOURNAMENT_START_SKILL);

@@ -968,7 +968,7 @@ export class App {
         <li>Safe shots (Body, Center Deep) cost less but are easier to read.</li>
         <li>A correctly read drop shot gets a big +0.6 bonus — don't get predictable with it.</li>
         <li>Skill is added to every shot and read. In a practice match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
-        <li>In a tournament the CPUs start at 0.30 and each round won adds a random 0.00–0.05. Your skill carries over from one tournament to the next.</li>
+        <li>In a tournament the CPUs start at 0.30 and each round won adds a random 0.01–0.05. Your skill carries over from one tournament to the next.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;
   }
