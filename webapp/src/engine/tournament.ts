@@ -1,7 +1,7 @@
 import { AiOpponent } from './ai';
 import { Match } from './match';
 import type { Rng } from './resolution';
-import { FULL_ENERGY, restBetweenMatches } from './energy';
+import { CPU_RANDOM_REST, CPU_REST_THRESHOLD, FULL_ENERGY, restBetweenMatches, restBySkipping } from './energy';
 import { MATCH_SCORING, type ScoringConfig } from './scoring';
 import { STYLES, type StyleId } from './styles';
 
@@ -15,8 +15,11 @@ export const ROUND_NAMES = ['Quarterfinal', 'Semifinal', 'Final'] as const;
 export const HUMAN = 0;
 
 export const CPU_NAMES = ['Ana', 'Bruno', 'Chen', 'Dara', 'Elio', 'Freya', 'Goran', 'Hana', 'Ivo', 'Jules', 'Kai', 'Lena', 'Milo', 'Nia', 'Oscar'];
-/** Players per draw. With 15 CPUs plus the human there are always two full draws. */
+/** Players per draw. With 15 CPUs plus the human there are two draws; empty slots are byes. */
 const DRAW_SIZE = 8;
+
+/** Each player's energy carried between tournaments, by name ('You' for the player). */
+export type Energies = Record<string, number>;
 
 export interface Entrant {
   name: string;
@@ -51,8 +54,9 @@ export interface Tournament {
   results: MatchResult[][];
   status: 'playing' | 'won' | 'lost';
   /**
-   * The CPUs in the simultaneous draw the player is not in, with their skills
-   * after it was played out. Not shown to the player.
+   * Every CPU not in the player's draw, with its skill and energy afterwards:
+   * those in the simultaneous background draw, and those sitting this one out.
+   * Not shown to the player.
    */
   background?: Entrant[];
 }
@@ -74,23 +78,52 @@ export const rollGain = (rng: Rng): number => {
   return Math.round(TOURNAMENT_MIN_GAIN * 100 + Math.floor(rng() * steps)) / 100;
 };
 
-/** `humanSkill` is the skill the player has carried over from earlier tournaments. */
 /** CPU players' skills carried over from earlier tournaments, by name. */
 export type Roster = Record<string, number>;
 
+/**
+ * Splits the CPUs into those who enter and those who sit out to rest: tired
+ * CPUs rest, and any CPU may rest at random. At least `minPlaying` enter; the
+ * freshest resters are called back if needed.
+ */
+const chooseEntrants = (cpus: Entrant[], rng: Rng, minPlaying: number) => {
+  const playing: Entrant[] = [];
+  const resting: Entrant[] = [];
+  for (const c of cpus) {
+    const tired = (c.energy ?? FULL_ENERGY) < CPU_REST_THRESHOLD;
+    (tired || rng() < CPU_RANDOM_REST ? resting : playing).push(c);
+  }
+  resting.sort((a, b) => (b.energy ?? FULL_ENERGY) - (a.energy ?? FULL_ENERGY));
+  while (playing.length < minPlaying && resting.length) playing.push(resting.shift()!);
+  return { playing, resting: resting.map((c) => ({ ...c, energy: restBySkipping(c.energy ?? FULL_ENERGY) })) };
+};
+
+const loadCpus = (rng: Rng, roster: Roster, styles: Record<string, StyleId>, energies: Energies): Entrant[] =>
+  shuffled(CPU_NAMES, rng).map(
+    (name): Entrant => ({
+      name,
+      skill: roster[name] ?? TOURNAMENT_START_SKILL,
+      style: styles[name] ?? 'balanced',
+      energy: energies[name] ?? FULL_ENERGY,
+    }),
+  );
+
+/**
+ * Starts the player's next tournament. `humanSkill` and `energies` carry over
+ * from earlier tournaments. Seven CPUs join the player's draw; the others play a
+ * simultaneous background draw or sit it out to rest.
+ */
 export const createTournament = (
   rng: Rng = Math.random,
   humanSkill = TOURNAMENT_START_SKILL,
   number = 1,
   roster: Roster = {},
   styles: Record<string, StyleId> = {},
+  energies: Energies = {},
 ): Tournament => {
-  // Every CPU plays: 7 join the player's draw and the rest play the other draw at the same time.
-  const cpus = shuffled(CPU_NAMES, rng).map(
-    (name): Entrant => ({ name, skill: roster[name] ?? TOURNAMENT_START_SKILL, style: styles[name] ?? 'balanced' }),
-  );
-  const entrants: Entrant[] = [{ name: 'You', skill: humanSkill }, ...cpus.slice(0, DRAW_SIZE - 1)];
-  const background = playKnockout(cpus.slice(DRAW_SIZE - 1), rng);
+  const { playing, resting } = chooseEntrants(loadCpus(rng, roster, styles, energies), rng, DRAW_SIZE - 1);
+  const entrants: Entrant[] = [{ name: 'You', skill: humanSkill, energy: energies.You ?? FULL_ENERGY }, ...playing.slice(0, DRAW_SIZE - 1)];
+  const background = [...playKnockout(playing.slice(DRAW_SIZE - 1), rng), ...resting];
   // The human's slot in the draw is random; the bracket pairs neighbours.
   const draw = shuffled(
     entrants.map((_, i) => i),
@@ -99,17 +132,27 @@ export const createTournament = (
   return { version: 2, number, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing', background };
 };
 
-/** Plays a whole CPU knockout and returns the players with their skills afterwards. */
+/**
+ * Plays a whole CPU knockout of up to DRAW_SIZE players and returns them with
+ * their skill and energy afterwards. Empty slots are byes: the player drawn
+ * against one goes through without playing, gaining nothing and spending nothing.
+ */
 const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
   const out = players.map((p) => ({ ...p }));
-  let alive = shuffled(
-    out.map((_, i) => i),
+  if (out.length === 0) return out;
+  let alive: (number | null)[] = shuffled(
+    [...out.map((_, i) => i), ...Array<null>(DRAW_SIZE - out.length).fill(null)],
     rng,
   );
   while (alive.length > 1) {
-    const winners: number[] = [];
+    const winners: (number | null)[] = [];
     for (let i = 0; i < alive.length; i += 2) {
-      const pair = [alive[i], alive[i + 1]];
+      const [x, y] = [alive[i], alive[i + 1]];
+      if (x === null || y === null) {
+        winners.push(x ?? y);
+        continue;
+      }
+      const pair = [x, y];
       const sim = simulateMatch([out[pair[0]].skill, out[pair[1]].skill], rng, [out[pair[0]].style, out[pair[1]].style], [
         out[pair[0]].energy ?? FULL_ENERGY,
         out[pair[1]].energy ?? FULL_ENERGY,
@@ -123,6 +166,28 @@ const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
     alive = winners;
   }
   return out;
+};
+
+/**
+ * Plays a whole tournament without the player, who sits it out to rest. Every
+ * CPU who enters plays in one of two draws (with byes for any empty slots).
+ * Returns every CPU with its skill and energy afterwards.
+ */
+export const playTournamentWithoutPlayer = (
+  rng: Rng = Math.random,
+  roster: Roster = {},
+  styles: Record<string, StyleId> = {},
+  energies: Energies = {},
+): Entrant[] => {
+  const { playing, resting } = chooseEntrants(loadCpus(rng, roster, styles, energies), rng, 0);
+  return [...playKnockout(playing.slice(0, DRAW_SIZE), rng), ...playKnockout(playing.slice(DRAW_SIZE), rng), ...resting];
+};
+
+/** Everyone's energy after this tournament, merged into the carried energies. */
+export const updateEnergies = (energies: Energies, t: Tournament): Energies => {
+  const next = { ...energies };
+  for (const e of [...t.entrants, ...(t.background ?? [])]) next[e.name] = e.energy ?? FULL_ENERGY;
+  return next;
 };
 
 /** Index of the round being played (0 = quarterfinal). */

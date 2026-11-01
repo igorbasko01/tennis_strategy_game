@@ -1,8 +1,20 @@
 import type { Rng } from './resolution';
 import { assignStyles, type StyleId } from './styles';
-import { CPU_NAMES, HUMAN, ROUND_NAMES, TOURNAMENT_START_SKILL, updateRoster, type Roster, type Tournament } from './tournament';
+import { FULL_ENERGY, restBySkipping } from './energy';
+import {
+  CPU_NAMES,
+  HUMAN,
+  ROUND_NAMES,
+  TOURNAMENT_START_SKILL,
+  updateEnergies,
+  updateRoster,
+  type Energies,
+  type Entrant,
+  type Roster,
+  type Tournament,
+} from './tournament';
 
-export type TournamentOutcome = 'playing' | 'won' | 'lost';
+export type TournamentOutcome = 'playing' | 'won' | 'lost' | 'skipped';
 
 /** One of the player's matches in a tournament, from the player's side. */
 export interface TournamentMatchRecord {
@@ -31,6 +43,8 @@ export interface Profile {
   tournaments: TournamentRecord[];
   /** CPU players' skills, carried from one tournament to the next. */
   roster?: Roster;
+  /** Everyone's energy carried into the next tournament, by name ('You' for the player). */
+  energy?: Energies;
   /** Each CPU player's playing style, dealt out when the profile is created. */
   styles?: Record<string, StyleId>;
 }
@@ -75,15 +89,33 @@ export const saveTournamentRecord = (p: Profile, t: Tournament): Profile => {
   return {
     ...p,
     roster: updateRoster(p.roster ?? {}, t),
+    energy: updateEnergies(p.energy ?? {}, t),
     nextTournament: Math.max(p.nextTournament, record.number + 1),
     tournaments: [...others, record].sort((a, b) => a.number - b.number),
   };
 };
 
+/**
+ * Records a tournament the player sat out: it gets its number and a "skipped"
+ * entry, the CPUs keep what they gained, and the player rests.
+ */
+export const recordSkippedTournament = (p: Profile, cpus: Entrant[], playerSkill: number): Profile => {
+  const number = p.nextTournament;
+  const roster = { ...(p.roster ?? {}) };
+  const energy = { ...(p.energy ?? {}) };
+  for (const c of cpus) {
+    roster[c.name] = c.skill;
+    energy[c.name] = c.energy ?? FULL_ENERGY;
+  }
+  energy.You = restBySkipping(energy.You ?? FULL_ENERGY);
+  const record: TournamentRecord = { number, status: 'skipped', startSkill: playerSkill, endSkill: playerSkill, matches: [] };
+  return { ...p, roster, energy, nextTournament: number + 1, tournaments: [...p.tournaments, record] };
+};
+
 export const profileStats = (p: Profile) => {
   const matches = p.tournaments.flatMap((t) => t.matches);
   return {
-    tournaments: p.tournaments.length,
+    tournaments: p.tournaments.filter((t) => t.status !== 'skipped').length,
     titles: p.tournaments.filter((t) => t.status === 'won').length,
     matchesWon: matches.filter((m) => m.won).length,
     matchesLost: matches.filter((m) => !m.won).length,
@@ -100,6 +132,8 @@ export const outcomeLabel = (r: TournamentRecord): string => {
       return `Knocked out in the ${reached.toLowerCase()}`;
     case 'playing':
       return `In progress · ${ROUND_NAMES[r.matches.length]}`;
+    case 'skipped':
+      return 'Skipped to rest';
   }
 };
 
@@ -110,6 +144,8 @@ export interface RankingRow {
   isPlayer: boolean;
   /** CPU playing style; absent for the player. */
   style?: StyleId;
+  /** Energy going into the next tournament (0-1). */
+  energy: number;
 }
 
 /**
@@ -118,12 +154,13 @@ export interface RankingRow {
  */
 export const rankings = (p: Profile, playerSkill: number): RankingRow[] => {
   const rows = [
-    { name: 'You', skill: playerSkill, isPlayer: true },
+    { name: 'You', skill: playerSkill, isPlayer: true, energy: p.energy?.You ?? FULL_ENERGY },
     ...CPU_NAMES.map((name) => ({
       name,
       skill: p.roster?.[name] ?? TOURNAMENT_START_SKILL,
       isPlayer: false,
       style: p.styles?.[name] ?? ('balanced' as StyleId),
+      energy: p.energy?.[name] ?? FULL_ENERGY,
     })),
   ].sort((a, b) => b.skill - a.skill || Number(b.isPlayer) - Number(a.isPlayer) || a.name.localeCompare(b.name));
   return rows.map((row) => ({ ...row, rank: 1 + rows.filter((other) => other.skill > row.skill).length }));

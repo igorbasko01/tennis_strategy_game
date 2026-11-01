@@ -3,6 +3,8 @@ import {
   CPU_NAMES,
   HUMAN,
   champion,
+  playTournamentWithoutPlayer,
+  updateEnergies,
   updateRoster,
   MAX_SKILL,
   TOURNAMENT_START_SKILL,
@@ -133,6 +135,41 @@ describe('tournament', () => {
   it('starts simulated matches from the energy given', () => {
     const tired = simulateMatch([0.3, 0.3], seeded(34), [undefined, undefined], [0.2, 0.2]);
     expect(Math.max(...tired.energy)).toBeLessThan(0.6);
+  });
+
+  it('carries everyone’s energy into the next tournament', () => {
+    const energies = Object.fromEntries([...CPU_NAMES, 'You'].map((n) => [n, 0.8]));
+    const t = createTournament(seeded(41), 0.3, 1, {}, {}, energies);
+    expect(t.entrants[HUMAN].energy).toBe(0.8);
+    for (const e of t.entrants.slice(1)) expect(e.energy).toBe(0.8);
+  });
+
+  it('lets tired CPUs sit out and rest, but always fills the player’s draw', () => {
+    const tired = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.2]));
+    const t = createTournament(seeded(42), 0.3, 1, {}, {}, tired);
+    expect(t.entrants).toHaveLength(8);
+    // Everyone else was too tired to enter, so they rested: +0.3 and no skill change.
+    expect(t.background).toHaveLength(CPU_NAMES.length - 7);
+    for (const b of t.background!) {
+      expect(b.energy).toBeCloseTo(0.5);
+      expect(b.skill).toBe(0.3);
+    }
+  });
+
+  it('fills a short background draw with byes', () => {
+    // Fresh CPUs: most enter, so the background draw has 8 or fewer real players.
+    const t = createTournament(seeded(43));
+    const names = [...t.entrants.slice(1), ...t.background!].map((e) => e.name).sort();
+    expect(names).toEqual([...CPU_NAMES].sort());
+    const updated = updateEnergies({}, t);
+    expect(Object.keys(updated).sort()).toEqual([...CPU_NAMES, 'You'].sort());
+  });
+
+  it('plays a tournament without the player when they skip it', () => {
+    const cpus = playTournamentWithoutPlayer(seeded(44));
+    expect(cpus.map((c) => c.name).sort()).toEqual([...CPU_NAMES].sort());
+    // Fifteen CPUs at most: two draws with byes still crown winners who gain skill.
+    expect(cpus.filter((c) => c.skill > 0.3).length).toBeGreaterThan(0);
   });
 
   it('rolls gains between 0.01 and 0.05 in 0.01 steps, never zero', () => {
