@@ -68,6 +68,8 @@ Sitting out a tournament costs a random 0.01–0.05 skill, but rest never takes 
 
 Every tournament has two 8-player draws played at the same time. The players who enter (CPUs who rest don't) are ranked by skill, equal skills in random order: the top eight make Tier 1 and the rest Tier 2, with byes for empty slots. The cut-off moves with who rests, so a lower-ranked player can reach Tier 1 when the top players sit out. The player's draw is always full: when the player is in Tier 2, it takes the bottom eight and Tier 1 is the short one.
 
+First-round pairs are matched by level: the strongest two in a draw play each other, then the next two, and so on, with equal skills in random order. In a short draw the strongest players get the byes.
+
 ### Energy
 
 Each player has energy from 100% (fresh) to 0% (exhausted). It is full at the start of a practice match. In tournaments energy carries over, both between matches and between tournaments, and each player regains 30% after every match (never above 100%). A player can skip a tournament to regain another 30%; CPUs skip below 50% energy, and 10% of the time at random. A short field is filled with byes.
