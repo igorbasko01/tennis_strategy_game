@@ -23,6 +23,7 @@ import {
   outcomeLabel,
   parseProfile,
   profileStats,
+  balance,
   rankings,
   recordSkippedTournament,
   saveTournamentRecord,
@@ -43,6 +44,7 @@ import {
   currentRound,
   decaySkill,
   pairings,
+  prizeMoney,
   parseTournament,
   playTournamentWithoutPlayer,
   recordHumanMatch,
@@ -100,6 +102,9 @@ const loadPlayerSkill = (): number => {
     return TOURNAMENT_START_SKILL;
   }
 };
+
+/** Whole dollars, e.g. $1,250. */
+const dollars = (n: number) => `$${n.toLocaleString('en-US')}`;
 
 const savePlayerSkill = (skill: number) => {
   try {
@@ -672,13 +677,16 @@ export class App {
       const t = this.tournament!;
       const roundName = ROUND_NAMES[currentRound(t)];
       const before = t.entrants[HUMAN].skill;
+      const prizeBefore = prizeMoney(t);
       const next = recordHumanMatch(t, w === 0, m.score.completedSets, Math.random, m.energy);
       this.storeTournament(next);
       // Skill won in the tournament stays with the player for the next one.
       savePlayerSkill(next.entrants[HUMAN].skill);
       const change = next.entrants[HUMAN].skill - before;
       const skillNote = `skill ${change < 0 ? '−' : '+'}${Math.abs(change).toFixed(2)}`;
-      subtitle = w === 0 ? `${roundName} won · ${skillNote}` : `Knocked out in the ${roundName.toLowerCase()} · ${skillNote}`;
+      const prize = prizeMoney(next) - prizeBefore;
+      const prizeNote = prize > 0 ? ` · +${dollars(prize)}` : '';
+      subtitle = (w === 0 ? `${roundName} won · ${skillNote}` : `Knocked out in the ${roundName.toLowerCase()} · ${skillNote}`) + prizeNote;
     }
     const el = $('#over');
     el.innerHTML = `
@@ -750,6 +758,7 @@ export class App {
         <div class="next-match">
           <div><span class="setting-label">Your energy</span><b>${Math.round(energy * 100)}%</b></div>
           <div><span class="setting-label">Your skill</span><b>${loadPlayerSkill().toFixed(2)}</b></div>
+          <div><span class="setting-label">Prize money</span><b>${dollars(balance(this.profile))}</b></div>
         </div>
         <button class="primary big" data-act="enter">Enter tournament</button>
         <button class="ghost" data-act="skip" ${rested <= energy ? 'disabled' : ''}>Skip &amp; rest (energy → ${Math.round(rested * 100)}%)</button>
@@ -848,7 +857,7 @@ export class App {
           ${
             r.status === 'skipped'
               ? ''
-              : `<p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}</p>
+              : `<p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}${r.prize ? ` · ${dollars(r.prize)} won` : ''}</p>
           ${matches ? `<ul>${matches}</ul>` : '<p class="tbd">No matches played yet</p>'}`
           }
         </section>`;
@@ -860,6 +869,7 @@ export class App {
         <h2>Profile</h2>
         <div class="stat-tiles">
           ${tile('Skill', loadPlayerSkill().toFixed(2))}
+          ${tile('Prize money', dollars(stats.prizeMoney))}
           ${tile('Tournaments', String(stats.tournaments))}
           ${tile('Titles', String(stats.titles))}
           ${tile('Matches', `${stats.matchesWon}–${stats.matchesLost}`)}
@@ -1022,6 +1032,7 @@ export class App {
         <li>Skill is added to every shot and read. In a practice match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
         <li>In a tournament everyone starts at 0.30 and skill carries over from one tournament to the next. Beating a stronger player gains a lot (up to 0.06); beating a much weaker one gains almost nothing. The loser drops by the same amount.</li>
         <li>Each tournament has two draws played at the same time. Tier 1 is the strongest eight players who enter, Tier 2 the rest, so who rests moves the cut-off. In the first round you play someone close to your level.</li>
+        <li>Tournaments pay prize money after every match: Tier 2 pays $10 for playing the quarterfinal, then $10, $20 and $40 for winning each round ($80 for a title); Tier 1 pays $25, $25, $50 and $100 ($200).</li>
         <li>Skipping a tournament costs 0.01–0.05 skill, but never takes you below 0.30.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;

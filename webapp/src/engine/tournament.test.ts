@@ -23,6 +23,8 @@ import {
   simulateMatch,
   splitTiers,
   levelDraw,
+  prizeMoney,
+  PRIZES,
   type Entrant,
 } from './tournament';
 
@@ -136,6 +138,29 @@ describe('tournament', () => {
     for (const t of [createTournament(seeded(23), 0.6, 1, roster), createTournament(seeded(24), 0.25, 1, strongRoster)]) {
       expect(t.entrants).toHaveLength(8);
     }
+  });
+
+  it('pays prize money for playing the quarterfinal and each round won, more in Tier 1', () => {
+    expect(PRIZES[2].reduce((a, b) => a + b)).toBe(80);
+    expect(PRIZES[1].reduce((a, b) => a + b)).toBe(200);
+    const weak = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.25]));
+    const rng = seeded(26);
+    let t = createTournament(rng, 0.6, 1, weak);
+    expect(t.tier).toBe(1);
+    expect(prizeMoney(t)).toBe(0);
+    t = recordHumanMatch(t, true, [[4, 1]], rng);
+    expect(prizeMoney(t)).toBe(50);
+    t = recordHumanMatch(t, true, [[4, 1]], rng);
+    expect(prizeMoney(t)).toBe(100);
+    t = recordHumanMatch(t, true, [[4, 1]], rng);
+    expect(t.status).toBe('won');
+    expect(prizeMoney(t)).toBe(200);
+
+    const strong = Object.fromEntries(CPU_NAMES.map((n) => [n, 0.6]));
+    const lost = recordHumanMatch(createTournament(seeded(27), 0.25, 1, strong), false, [[1, 4]], seeded(28));
+    expect(lost.tier).toBe(2);
+    // Knocked out in the quarterfinal; the rest of the draw doesn't add to it.
+    expect(prizeMoney(lost)).toBe(10);
   });
 
   it('pairs first-round opponents of similar skill', () => {

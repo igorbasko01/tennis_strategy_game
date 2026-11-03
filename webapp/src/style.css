@@ -995,8 +995,17 @@ td.neg {
 
 .stat-tiles {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* Three tiles on the first row, two on the second. */
+  grid-template-columns: repeat(6, 1fr);
   gap: 6px;
+}
+
+.stat-tiles > .stat-tile {
+  grid-column: span 2;
+}
+
+.stat-tiles > .stat-tile:nth-child(n + 4) {
+  grid-column: span 3;
 }
 
 .stat-tile {
