@@ -22,6 +22,7 @@ import {
   rollDecay,
   simulateMatch,
   splitTiers,
+  levelDraw,
   type Entrant,
 } from './tournament';
 
@@ -135,6 +136,23 @@ describe('tournament', () => {
     for (const t of [createTournament(seeded(23), 0.6, 1, roster), createTournament(seeded(24), 0.25, 1, strongRoster)]) {
       expect(t.entrants).toHaveLength(8);
     }
+  });
+
+  it('pairs first-round opponents of similar skill', () => {
+    const skills = [0.31, 0.5, 0.33, 0.45, 0.3, 0.42, 0.36, 0.48];
+    const draw = levelDraw(skills, seeded(9));
+    expect(draw.map((i) => skills[i])).toEqual([0.5, 0.48, 0.45, 0.42, 0.36, 0.33, 0.31, 0.3]);
+    // Equal skills are drawn in random order.
+    const orders = new Set([1, 2, 3, 4, 5, 6].map((seed) => levelDraw([0.3, 0.3, 0.3, 0.3], seeded(seed)).join()));
+    expect(orders.size).toBeGreaterThan(1);
+  });
+
+  it('pairs the player with someone of their level in the first round', () => {
+    const roster = Object.fromEntries(CPU_NAMES.map((n, i) => [n, 0.6 - i * 0.02]));
+    const t = createTournament(seeded(25), 0.45, 1, roster);
+    const [, opp] = pairings(t, 0).find((p) => p.includes(HUMAN))!.sort((a, b) => a - b);
+    for (const [a, b] of pairings(t, 0)) expect(Math.abs(t.entrants[a].skill - t.entrants[b].skill)).toBeLessThanOrEqual(0.06 + 1e-9);
+    expect(Math.abs(t.entrants[opp].skill - 0.45)).toBeLessThanOrEqual(0.04 + 1e-9);
   });
 
   it('puts every CPU in a draw: seven with the player and the rest in a simultaneous background draw', () => {

@@ -154,6 +154,17 @@ const loadCpus = (rng: Rng, roster: Roster, styles: Record<string, StyleId>, ene
     }),
   );
 
+/**
+ * First-round order for a draw of entrant indices: players are paired with
+ * someone of similar skill (1st v 2nd, 3rd v 4th, ...), equal skills in random
+ * order. The bracket pairs neighbours, so this is also the draw order.
+ */
+export const levelDraw = (skills: readonly number[], rng: Rng): number[] =>
+  shuffled(
+    skills.map((_, i) => i),
+    rng,
+  ).sort((a, b) => skills[b] - skills[a]);
+
 /** Highest skill first; equal skills keep their order. */
 const bySkill = (players: Entrant[]) => [...players].sort((a, b) => b.skill - a.skill);
 
@@ -195,9 +206,8 @@ export const createTournament = (
   const { tier, mine, others } = splitTiers(field, human);
   const entrants: Entrant[] = [human, ...mine];
   const background = [...playKnockout(others, rng), ...resting];
-  // The human's slot in the draw is random; the bracket pairs neighbours.
-  const draw = shuffled(
-    entrants.map((_, i) => i),
+  const draw = levelDraw(
+    entrants.map((e) => e.skill),
     rng,
   );
   return { version: 3, number, tier, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing', background };
@@ -211,10 +221,18 @@ export const createTournament = (
 const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
   const out = players.map((p) => ({ ...p }));
   if (out.length === 0) return out;
-  let alive: (number | null)[] = shuffled(
-    [...out.map((_, i) => i), ...Array<null>(DRAW_SIZE - out.length).fill(null)],
+  // Paired by level; in a short draw the strongest get the byes.
+  const order = levelDraw(
+    out.map((p) => p.skill),
     rng,
   );
+  const matches = Math.max(0, order.length - DRAW_SIZE / 2);
+  const byes = order.length - 2 * matches;
+  let alive: (number | null)[] = [
+    ...order.slice(0, byes).flatMap((i) => [i, null]),
+    ...order.slice(byes),
+    ...Array<null>(DRAW_SIZE - 2 * byes - 2 * matches).fill(null),
+  ];
   while (alive.length > 1) {
     const winners: (number | null)[] = [];
     for (let i = 0; i < alive.length; i += 2) {
