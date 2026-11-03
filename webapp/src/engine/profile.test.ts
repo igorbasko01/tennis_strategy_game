@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyProfile, outcomeLabel, parseProfile, profileStats, rankings, recordSkippedTournament, saveTournamentRecord, summarizeTournament } from './profile';
+import { balance, emptyProfile, outcomeLabel, parseProfile, profileStats, rankings, recordSkippedTournament, saveTournamentRecord, summarizeTournament } from './profile';
 import { CPU_NAMES, createTournament, playTournamentWithoutPlayer, recordHumanMatch } from './tournament';
 
 const seeded = (seed: number) => () => {
@@ -52,7 +52,7 @@ describe('profile', () => {
     const t2 = recordHumanMatch(createTournament(rng, t.entrants[0].skill, p.nextTournament), false, [[0, 4]], rng);
     p = saveTournamentRecord(p, t2);
     expect(p.tournaments.map((x) => x.number)).toEqual([1, 2]);
-    expect(profileStats(p)).toEqual({ tournaments: 2, titles: 0, matchesWon: 1, matchesLost: 1 });
+    expect(profileStats(p)).toMatchObject({ tournaments: 2, titles: 0, matchesWon: 1, matchesLost: 1 });
   });
 
   it('saves CPU skills into the roster and still labels an early exit by the human’s last round', () => {
@@ -75,6 +75,21 @@ describe('profile', () => {
     // Everyone not in the roster yet is at the starting skill, tied for 4th.
     expect(rows.slice(3).every((r) => r.skill === 0.3 && r.rank === 4)).toBe(true);
     expect(rows.filter((r) => r.isPlayer)).toHaveLength(1);
+  });
+
+  it('adds up prize money across tournaments, nothing for skipped ones', () => {
+    const rng = seeded(9);
+    let p = emptyProfile(rng);
+    const t1 = recordHumanMatch(createTournament(rng, 0.3, 1), false, [[1, 4]], rng);
+    p = saveTournamentRecord(p, t1);
+    expect(p.tournaments[0].prize).toBe(t1.tier === 1 ? 25 : 10);
+    p = recordSkippedTournament(p, playTournamentWithoutPlayer(rng), 0.3, 0.3);
+    expect(p.tournaments[1].prize).toBe(0);
+    expect(balance(p)).toBe(p.tournaments[0].prize);
+    expect(profileStats(p).prizeMoney).toBe(balance(p));
+    // Saving the same tournament again replaces its record rather than paying twice.
+    p = saveTournamentRecord(p, t1);
+    expect(balance(p)).toBe(p.tournaments[0].prize);
   });
 
   it('records a skipped tournament: the player rests, loses some skill, and the CPUs move on', () => {

@@ -41,6 +41,12 @@ const DRAW_SIZE = 8;
  */
 export type Tier = 1 | 2;
 
+/**
+ * Prize money in dollars by tier: the first entry is paid for playing the
+ * quarterfinal, the rest for winning each round. A title is worth the sum.
+ */
+export const PRIZES: Record<Tier, readonly number[]> = { 1: [25, 25, 50, 100], 2: [10, 10, 20, 40] };
+
 /** Each player's energy carried between tournaments, by name ('You' for the player). */
 export type Energies = Record<string, number>;
 
@@ -278,6 +284,14 @@ export const updateEnergies = (energies: Energies, t: Tournament): Energies => {
   const next = { ...energies };
   for (const e of [...t.entrants, ...(t.background ?? [])]) next[e.name] = e.energy ?? FULL_ENERGY;
   return next;
+};
+
+/** Prize money the human has earned in this tournament so far. */
+export const prizeMoney = (t: Tournament): number => {
+  const mine = t.results.flatMap((round) => round.filter((m) => m.players.includes(HUMAN)));
+  if (mine.length === 0) return 0;
+  const wins = mine.filter((m) => m.winner === HUMAN).length;
+  return PRIZES[t.tier].slice(0, 1 + wins).reduce((sum, p) => sum + p, 0);
 };
 
 /** Index of the round being played (0 = quarterfinal). */

@@ -68,6 +68,18 @@ Sitting out a tournament costs a random 0.01–0.05 skill, but rest never takes 
 
 Every tournament has two 8-player draws played at the same time. The players who enter (CPUs who rest don't) are ranked by skill, equal skills in random order: the top eight make Tier 1 and the rest Tier 2, with byes for empty slots. The cut-off moves with who rests, so a lower-ranked player can reach Tier 1 when the top players sit out. The player's draw is always full: when the player is in Tier 2, it takes the bottom eight and Tier 1 is the short one.
 
+Prize money (in dollars) is paid after every tournament match, by tier:
+
+| | Tier 2 | Tier 1 |
+| --- | --- | --- |
+| Playing the quarterfinal | $10 | $25 |
+| Winning the quarterfinal | +$10 | +$25 |
+| Winning the semifinal | +$20 | +$50 |
+| Winning the final | +$40 | +$100 |
+| Title in total | $80 | $200 |
+
+Practice matches and skipped tournaments pay nothing. The player's total is kept in the profile; CPUs don't earn money yet.
+
 First-round pairs are matched by level: the strongest two in a draw play each other, then the next two, and so on, with equal skills in random order. In a short draw the strongest players get the byes.
 
 ### Energy
