@@ -617,6 +617,73 @@ button:focus-visible {
   color: var(--text);
 }
 
+.factors {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.factors i {
+  font-style: normal;
+  color: var(--text);
+}
+
+.factors i.skill {
+  color: var(--text);
+}
+
+.factors i.choices {
+  color: var(--target);
+}
+
+.factors i.position {
+  color: var(--good);
+}
+
+.factors i.energy {
+  color: var(--energy);
+}
+
+.factors i.luck {
+  color: var(--read);
+}
+
+.calc-details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  list-style: none;
+  padding: 2px 0;
+}
+
+.calc-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.calc-details > summary::after {
+  content: ' ▸';
+}
+
+.calc-details[open] > summary::after {
+  content: ' ▾';
+}
+
+.calc-details > summary b {
+  color: var(--text);
+}
+
+.calc-details .context {
+  margin: 2px 0 4px;
+}
+
+.sb-name .style {
+  display: inline;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .verdict.good b {
   color: var(--good);
 }
