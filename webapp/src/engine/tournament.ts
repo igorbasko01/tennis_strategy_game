@@ -161,15 +161,25 @@ const loadCpus = (rng: Rng, roster: Roster, styles: Record<string, StyleId>, ene
   );
 
 /**
- * First-round order for a draw of entrant indices: players are paired with
- * someone of similar skill (1st v 2nd, 3rd v 4th, ...), equal skills in random
- * order. The bracket pairs neighbours, so this is also the draw order.
+ * Bracket slots, by skill rank (0 = strongest), so that neighbours meet in the
+ * quarterfinal: 1st v 3rd and 5th v 7th in the top half, 2nd v 4th and 6th v
+ * 8th in the bottom half. First-round opponents are never more than two places
+ * apart, and the two strongest can only meet in the final.
  */
-export const levelDraw = (skills: readonly number[], rng: Rng): number[] =>
-  shuffled(
+const SEEDING = [0, 2, 4, 6, 1, 3, 5, 7];
+
+/**
+ * The draw for up to DRAW_SIZE players, given their skills: indices in bracket
+ * order (see SEEDING), equal skills in random order. A short draw is padded with
+ * byes (null) in the weakest players' places.
+ */
+export const seededDraw = (skills: readonly number[], rng: Rng): (number | null)[] => {
+  const ranked = shuffled(
     skills.map((_, i) => i),
     rng,
   ).sort((a, b) => skills[b] - skills[a]);
+  return SEEDING.map((rank) => ranked[rank] ?? null);
+};
 
 /** Highest skill first; equal skills keep their order. */
 const bySkill = (players: Entrant[]) => [...players].sort((a, b) => b.skill - a.skill);
@@ -212,10 +222,11 @@ export const createTournament = (
   const { tier, mine, others } = splitTiers(field, human);
   const entrants: Entrant[] = [human, ...mine];
   const background = [...playKnockout(others, rng), ...resting];
-  const draw = levelDraw(
+  // The player's draw is always full, so it has no byes.
+  const draw = seededDraw(
     entrants.map((e) => e.skill),
     rng,
-  );
+  ) as number[];
   return { version: 3, number, tier, startSkill: humanSkill, entrants, draws: [draw], results: [], status: 'playing', background };
 };
 
@@ -227,18 +238,10 @@ export const createTournament = (
 const playKnockout = (players: Entrant[], rng: Rng): Entrant[] => {
   const out = players.map((p) => ({ ...p }));
   if (out.length === 0) return out;
-  // Paired by level; in a short draw the strongest get the byes.
-  const order = levelDraw(
+  let alive = seededDraw(
     out.map((p) => p.skill),
     rng,
   );
-  const matches = Math.max(0, order.length - DRAW_SIZE / 2);
-  const byes = order.length - 2 * matches;
-  let alive: (number | null)[] = [
-    ...order.slice(0, byes).flatMap((i) => [i, null]),
-    ...order.slice(byes),
-    ...Array<null>(DRAW_SIZE - 2 * byes - 2 * matches).fill(null),
-  ];
   while (alive.length > 1) {
     const winners: (number | null)[] = [];
     for (let i = 0; i < alive.length; i += 2) {
