@@ -15,6 +15,14 @@ export const hitChance = (d: Duel): number => {
   return x >= 0 ? (w - x) ** 2 / (2 * w * w) : 1 - (w + x) ** 2 / (2 * w * w);
 };
 
+export type FactorId = 'skill' | 'choices' | 'position' | 'energy' | 'luck';
+
+/** One part of the gap between the two totals, from the player's side: + helped, − hurt. */
+export interface Factor {
+  id: FactorId;
+  value: number;
+}
+
 export interface Verdict {
   /** Short plain-language call, e.g. "Good read, unlucky". */
   title: string;
@@ -24,44 +32,44 @@ export interface Verdict {
   chanceLabel: string;
   /** True when `me` won the duel. */
   won: boolean;
-  /** The biggest non-luck reasons, e.g. "−0.40 misread", "+0.20 fresh legs". */
-  reasons: string[];
+  /** What decided the duel, biggest first; parts too small to matter are left out. They add up to the final gap. */
+  factors: Factor[];
 }
 
-const signed = (n: number) => `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(2)}`;
-
-/** Ignore effects too small to matter. */
+/** Ignore parts too small to matter. */
 const NOTABLE = 0.03;
 
-/** Explains a duel from `me`'s side: the odds before the dice, and why. */
-export const duelVerdict = (d: Duel, me: PlayerIndex): Verdict => {
+/** Explains a duel from `me`'s side: the odds before the dice, the call, and what decided it. */
+export const duelVerdict = (d: Duel, me: PlayerIndex, opponent = 'They'): Verdict => {
   const p = hitChance(d);
   const defending = d.defender === me;
   const chance = defending ? 1 - p : p;
   const won = defending ? !d.hitterWins : d.hitterWins;
   const favoured = chance >= 0.5;
   const readRight = d.readCalc.modifier > 0;
-  const scramble = d.scramble;
-  const readFatigue = d.readCalc.energy - scramble;
 
   let title: string;
   if (defending) {
     if (won) title = favoured ? (readRight ? 'Right read' : 'Saved it') : 'Lucky save';
-    else title = favoured ? 'Good read, unlucky' : readRight ? 'Right read, outplayed' : 'Wrong read';
+    else if (favoured) title = readRight ? 'Good read, unlucky' : 'Unlucky';
+    else title = readRight ? 'Right read, outplayed' : 'Wrong read';
   } else if (won) title = favoured ? 'Good shot' : 'Lucky shot';
-  else title = favoured ? 'Unlucky' : readRight ? 'They read it' : 'Covered anyway';
+  else title = favoured ? 'Unlucky' : readRight ? `${opponent} read it` : `${opponent} covered it`;
 
-  const reasons: string[] = [];
-  const readNote = readRight ? 'right read' : 'misread';
-  if (defending) {
-    reasons.push(`${signed(d.readCalc.modifier)} ${readNote}`);
-    if (scramble >= NOTABLE) reasons.push(`${signed(scramble)} fresh legs`);
-    if (readFatigue <= -NOTABLE) reasons.push(`${signed(readFatigue)} tired`);
-  } else {
-    reasons.push(`${signed(d.readCalc.modifier)} their ${readNote}`);
-    if (scramble >= NOTABLE) reasons.push(`${signed(scramble)} their fresh legs`);
-    if (Math.abs(d.shotCalc.position) >= NOTABLE) reasons.push(`${signed(d.shotCalc.position)} ${d.shotCalc.position > 0 ? 'in position' : 'stretched'}`);
-    if (d.shotCalc.energy <= -NOTABLE) reasons.push(`${signed(d.shotCalc.energy)} tired`);
-  }
-  return { title, chance, chanceLabel: defending ? 'to hold' : 'to get it past', won, reasons };
+  // Every part of the totals, as mine minus theirs.
+  const [mine, theirs] = defending ? [d.readCalc, d.shotCalc] : [d.shotCalc, d.readCalc];
+  const factors: Factor[] = (
+    [
+      { id: 'skill', value: mine.skill - theirs.skill },
+      { id: 'choices', value: mine.modifier - theirs.modifier },
+      { id: 'position', value: mine.position - theirs.position },
+      { id: 'energy', value: mine.energy - theirs.energy },
+      { id: 'luck', value: mine.random - theirs.random },
+    ] as Factor[]
+  )
+    .map((f) => ({ ...f, value: Math.round(f.value * 100) / 100 }))
+    .filter((f) => Math.abs(f.value) >= NOTABLE)
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+
+  return { title, chance, chanceLabel: defending ? 'to hold' : 'to get it past', won, factors };
 };

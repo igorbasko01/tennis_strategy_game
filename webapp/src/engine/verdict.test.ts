@@ -42,31 +42,40 @@ describe('verdict', () => {
 
   it('separates a good read from good luck, from the player’s side', () => {
     // Neutral vs Wide, fresh: the serve rolls high, the read low, so the serve gets through.
-    const unlucky = duelVerdict(wideServe('neutral', [1, 1], [0.25, -0.2]), 0);
-    expect(unlucky).toMatchObject({ title: 'Good read, unlucky', won: false, chanceLabel: 'to hold' });
+    const unlucky = duelVerdict(wideServe('neutral', [1, 1], [0.25, -0.2]), 0, 'Freya');
+    // A wrong read that was still favoured (fresh legs): unlucky, but not a good read.
+    expect(unlucky).toMatchObject({ title: 'Unlucky', won: false, chanceLabel: 'to hold' });
     expect(unlucky.chance).toBeCloseTo(0.653, 3);
-    expect(unlucky.reasons).toEqual(['−0.40 misread', '+0.20 fresh legs']);
-
     expect(duelVerdict(wideServe('neutral', [1, 1], [0, 0]), 0).title).toBe('Saved it');
     expect(duelVerdict(wideServe('wide', [1, 1], [0, 0]), 0).title).toBe('Right read');
-
     // T vs Wide when tired: a wrong read that usually loses.
-    const tired = wideServe('tLine', [0.3, 0.3], [0.1, -0.1]);
-    const wrong = duelVerdict(tired, 0);
+    const wrong = duelVerdict(wideServe('tLine', [0.3, 0.3], [0.1, -0.1]), 0);
     expect(wrong.title).toBe('Wrong read');
     expect(wrong.chance).toBeLessThan(0.3);
-    expect(wrong.reasons[0]).toBe('−0.60 misread');
-    expect(wrong.reasons).toContain('+0.09 fresh legs');
-    expect(wrong.reasons.some((r) => r.endsWith('tired'))).toBe(true);
     expect(duelVerdict(wideServe('tLine', [0.3, 0.3], [-0.3, 0.29]), 0).title).toBe('Lucky save');
   });
 
-  it('explains the player’s own shots too', () => {
-    const d = wideServe('tLine', [1, 1], [0.2, -0.2]);
-    // The CPU served (player 1) and beat the player's wrong read.
-    const v = duelVerdict(d, 1);
-    expect(v).toMatchObject({ won: true, chanceLabel: 'to get it past' });
-    expect(v.reasons[0]).toBe('−0.60 their misread');
-    expect(v.reasons).toContain('+0.30 their fresh legs');
+  it('ranks what decided the shot, biggest first, adding up to the gap', () => {
+    // Like Freya (0.40, tired) serving wide to a fresher, stronger player (0.52) who read Neutral.
+    const rolls = [0.08, 0.22];
+    const rng = () => (rolls.shift()! + 0.3) / 0.6;
+    const d = resolveDuel('serve', 1, 0.4, 'wide', SERVE_COST.wide, 0.52, 'neutral', SERVE_RECEIVE_MODIFIER.wide.neutral, rng, 0, [0.7, 0.53]);
+    const v = duelVerdict(d, 0, 'Freya');
+    expect(v.title).toBe('Saved it');
+    expect(v.factors.map((f) => f.id)).toEqual(['energy', 'luck', 'skill', 'choices']);
+    expect(v.factors.find((f) => f.id === 'skill')!.value).toBeCloseTo(0.12);
+    expect(v.factors.find((f) => f.id === 'choices')!.value).toBeCloseTo(-0.1);
+    const gap = d.readCalc.total - d.shotCalc.total;
+    expect(v.factors.reduce((sum, f) => sum + f.value, 0)).toBeCloseTo(gap, 1);
+  });
+
+  it('names the opponent and explains the player’s own shots too', () => {
+    // The player (0) serves wide into a right read: the opponent read it.
+    const rolls = [0, 0];
+    const rng = () => (rolls.shift()! + 0.3) / 0.6;
+    const d = resolveDuel('serve', 0, 0.3, 'wide', SERVE_COST.wide, 0.3, 'wide', SERVE_RECEIVE_MODIFIER.wide.wide, rng, 0, [1, 1]);
+    const v = duelVerdict(d, 0, 'Freya');
+    expect(v).toMatchObject({ title: 'Freya read it', won: false, chanceLabel: 'to get it past' });
+    expect(v.factors[0]).toEqual({ id: 'choices', value: -0.6 });
   });
 });

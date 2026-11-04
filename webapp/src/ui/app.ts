@@ -1,4 +1,4 @@
-import { duelVerdict } from '../engine/verdict';
+import { duelVerdict, type FactorId } from '../engine/verdict';
 import {
   ATTACK_ACTIONS,
   ATTACK_COST,
@@ -60,11 +60,13 @@ interface Settings {
   playerSkill: SkillTierId;
   cpuSkill: SkillTierId;
   muted: boolean;
+  /** Whether each shot's number breakdown starts expanded. */
+  showBreakdown: boolean;
 }
 
 
 const SETTINGS_KEY = 'tennis-strategy-settings';
-const DEFAULT_SETTINGS: Settings = { playerSkill: 'pro', cpuSkill: 'pro', muted: false };
+const DEFAULT_SETTINGS: Settings = { playerSkill: 'pro', cpuSkill: 'pro', muted: false, showBreakdown: false };
 
 const loadSettings = (): Settings => {
   try {
@@ -553,11 +555,37 @@ export class App {
       </div>`;
   }
 
-  /** One line from the player's side: the call, the odds before the dice, and the main reasons. */
+  /**
+   * The player's-side summary of a shot: the call, the odds before the dice,
+   * and what decided it, biggest factor first.
+   */
   private verdictLine(d: Duel): string {
-    const v = duelVerdict(d, 0);
+    const v = duelVerdict(d, 0, this.names[1]);
     const pct = Math.round(v.chance * 100);
-    return `<p class="verdict ${v.won ? 'good' : 'bad'}"><b>${v.title}</b> · ${pct}% ${v.chanceLabel}${v.reasons.length ? ` · ${v.reasons.join(' · ')}` : ''}</p>`;
+    const label: Record<FactorId, string> = { skill: 'skill', choices: 'choices', position: 'position', energy: 'energy', luck: 'luck' };
+    const factor = (i: number) => `<i class="${v.factors[i].id}">${label[v.factors[i].id]} ${fmt(v.factors[i].value)}</i>`;
+    const decided = v.factors.length
+      ? `Biggest factor: <b>${factor(0)}</b>${v.factors.length > 1 ? `, then ${v.factors.slice(1).map((_, i) => factor(i + 1)).join(' · ')}` : ''}`
+      : 'Dead even';
+    return `
+      <p class="verdict ${v.won ? 'good' : 'bad'}"><b>${escapeHtml(v.title)}</b> · ${pct}% ${v.chanceLabel}</p>
+      <p class="factors">${decided}</p>`;
+  }
+
+  /** Both totals, with the full sum behind a tap. */
+  private calcDetails(d: Duel): string {
+    const [first, second] = [d.hitter, d.defender];
+    const total = (p: PlayerIndex) => {
+      const n = Math.round((p === d.hitter ? d.shotCalc : d.readCalc).total * 100) / 100;
+      return `${n < 0 ? '−' : ''}${Math.abs(n).toFixed(2)}`;
+    };
+    return `
+      <details class="calc-details"${this.settings.showBreakdown ? ' open' : ''}>
+        <summary>${escapeHtml(this.names[first])} <b>${total(first)}</b> vs ${escapeHtml(this.names[second])} <b>${total(second)}</b></summary>
+        <p class="context">skill <i>shot/read</i> <i class="position">position</i> <i class="energy">energy</i> <i class="luck">luck</i></p>
+        ${this.calcRow(d.hitter, this.shotWhat(d), d.shotCalc)}
+        ${this.calcRow(d.defender, this.readWhat(d), d.readCalc)}
+      </details>`;
   }
 
   private duelResult(d: Duel): string {
@@ -577,7 +605,6 @@ export class App {
     panel.innerHTML = `
       <div class="panel-head">
         <span class="role ${winner === null ? '' : winner === 0 ? 'good' : 'bad'}">${escapeHtml(headline)}</span>
-        <span class="context">skill <i>shot/read</i> <i class="position">position</i> <i class="energy">energy</i> <i class="luck">luck</i></span>
       </div>
       <div class="duels">
         ${ex.duels
@@ -586,13 +613,21 @@ export class App {
           <div class="duel ${d.hitterWins ? 'hit' : 'held'}">
             <div class="duel-title"><span>${verb[d.kind]} · ${escapeHtml(shotLabel(d))}</span><b>${this.duelResult(d)}</b></div>
             ${this.verdictLine(d)}
-            ${this.calcRow(d.hitter, this.shotWhat(d), d.shotCalc)}
-            ${this.calcRow(d.defender, this.readWhat(d), d.readCalc)}
+            ${this.calcDetails(d)}
           </div>`,
           )
           .join('')}
       </div>
       <button class="primary">${nextLabel}</button>`;
+    // Opening or closing one breakdown does the same to the others and is remembered.
+    for (const det of panel.querySelectorAll<HTMLDetailsElement>('.calc-details')) {
+      det.addEventListener('toggle', () => {
+        if (this.settings.showBreakdown === det.open) return;
+        this.settings.showBreakdown = det.open;
+        saveSettings(this.settings);
+        for (const other of panel.querySelectorAll<HTMLDetailsElement>('.calc-details')) other.open = det.open;
+      });
+    }
     return new Promise((resolve) => {
       panel.querySelector('.primary')!.addEventListener('click', () => resolve());
     });
@@ -632,7 +667,7 @@ export class App {
       return `
         <div class="sb-row">
           <span class="serve-dot ${m.server === p && !m.isOver ? 'on' : ''}"></span>
-          <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}</span>
+          <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}${p === 1 && this.setup ? ` <small class="style">${STYLES[this.setup.cpuStyle].icon} ${STYLES[this.setup.cpuStyle].label}</small>` : ''}</span>
           ${m.isOver ? '' : this.energyBar(m.energy[p])}
           ${sets}
           <span class="set current">${m.isOver ? '' : m.score.games[p]}</span>
@@ -1021,9 +1056,11 @@ export class App {
       every point and more at changeovers.</p>
       <p>While you are fresh you can scramble back from a wrong read and recover up to half its penalty, so early
       rallies last longer. As you tire that recovery fades, and every shot and read loses up to −0.15.</p>
-      <p>Under each shot a line sums it up from your side: a call such as “Good read, unlucky”, your chance of
-      winning that shot before the dice were rolled, and the main reasons (your read, fresh legs, tiredness,
-      position). A good choice can still lose to the dice, and a bad one can get lucky.</p>
+      <p>Under each shot a line sums it up from your side: a call such as “Good read, unlucky” and your chance of
+      winning that shot before the dice were rolled. Below it, the factors behind the result, biggest first: <b>skill</b>,
+      <b>choices</b> (your shot or read against theirs), <b>position</b>, <b>energy</b> (fresh legs or
+      tiredness) and <b>luck</b> (the dice), each as how much it helped (+) or hurt (−) you. A good choice can
+      still lose to the dice, and a bad one can get lucky. Tap the two totals to see the full sums.</p>
       <p>In the shot breakdown the purple <b>energy</b> term combines both: a plus means a scramble saved part of a
       wrong read (the read is marked “scrambled”), a minus means fatigue. The energy a misread costs shows in the
       bar by your name.</p>
