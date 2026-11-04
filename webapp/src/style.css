@@ -606,6 +606,25 @@ button:focus-visible {
   color: var(--read);
 }
 
+.verdict {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.verdict b {
+  color: var(--text);
+}
+
+.verdict.good b {
+  color: var(--good);
+}
+
+.verdict.bad b {
+  color: var(--bad);
+}
+
 .calc {
   display: flex;
   flex-wrap: wrap;

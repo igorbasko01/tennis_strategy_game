@@ -91,6 +91,8 @@ export interface Duel {
   read: ServeReceiveAction | DefendAction;
   shotCalc: Calculation;
   readCalc: Calculation;
+  /** Part of the read's energy term won back by scrambling after a wrong read (0 when none). */
+  scramble: number;
   /** True when the shot beat the read (shot total strictly greater). */
   hitterWins: boolean;
 }
@@ -117,7 +119,8 @@ export const resolveDuel = (
 ): Duel => {
   const defender = other(hitter);
   const shotEnergy = energy ? fatiguePenalty(energy[hitter]) : 0;
-  const readEnergy = energy ? fatiguePenalty(energy[defender]) + recoveryBonus(readModifier, energy[defender]) : 0;
+  const scramble = energy ? recoveryBonus(readModifier, energy[defender]) : 0;
+  const readEnergy = energy ? fatiguePenalty(energy[defender]) + scramble : 0;
   const shotCalc = calculate(hitterSkill, shotCost, rollRandomFactor(rng), hitterPosition, shotEnergy);
   const readCalc = calculate(defenderSkill, readModifier, rollRandomFactor(rng), 0, readEnergy);
   return {
@@ -128,6 +131,7 @@ export const resolveDuel = (
     read,
     shotCalc,
     readCalc,
+    scramble,
     hitterWins: shotCalc.total > readCalc.total,
   };
 };
