@@ -1,3 +1,4 @@
+import { duelVerdict } from '../engine/verdict';
 import {
   ATTACK_ACTIONS,
   ATTACK_COST,
@@ -552,6 +553,13 @@ export class App {
       </div>`;
   }
 
+  /** One line from the player's side: the call, the odds before the dice, and the main reasons. */
+  private verdictLine(d: Duel): string {
+    const v = duelVerdict(d, 0);
+    const pct = Math.round(v.chance * 100);
+    return `<p class="verdict ${v.won ? 'good' : 'bad'}"><b>${v.title}</b> · ${pct}% ${v.chanceLabel}${v.reasons.length ? ` · ${v.reasons.join(' · ')}` : ''}</p>`;
+  }
+
   private duelResult(d: Duel): string {
     if (!d.hitterWins) return d.kind === 'serve' ? 'Returned' : 'Covered';
     return d.kind === 'serve' ? 'Ace!' : d.kind === 'return' ? 'Return winner!' : 'Winner!';
@@ -577,6 +585,7 @@ export class App {
             (d) => `
           <div class="duel ${d.hitterWins ? 'hit' : 'held'}">
             <div class="duel-title"><span>${verb[d.kind]} · ${escapeHtml(shotLabel(d))}</span><b>${this.duelResult(d)}</b></div>
+            ${this.verdictLine(d)}
             ${this.calcRow(d.hitter, this.shotWhat(d), d.shotCalc)}
             ${this.calcRow(d.defender, this.readWhat(d), d.readCalc)}
           </div>`,
@@ -1012,6 +1021,9 @@ export class App {
       every point and more at changeovers.</p>
       <p>While you are fresh you can scramble back from a wrong read and recover up to half its penalty, so early
       rallies last longer. As you tire that recovery fades, and every shot and read loses up to −0.15.</p>
+      <p>Under each shot a line sums it up from your side: a call such as “Good read, unlucky”, your chance of
+      winning that shot before the dice were rolled, and the main reasons (your read, fresh legs, tiredness,
+      position). A good choice can still lose to the dice, and a bad one can get lucky.</p>
       <p>In the shot breakdown the purple <b>energy</b> term combines both: a plus means a scramble saved part of a
       wrong read (the read is marked “scrambled”), a minus means fatigue. The energy a misread costs shows in the
       bar by your name.</p>
