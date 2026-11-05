@@ -82,7 +82,7 @@ Practice matches and skipped tournaments pay nothing. The player's total is kept
 
 After being knocked out of a tournament the player can buy one coaching review for that tournament: +0.01 skill (less than a match against an equal can give) and a summary of the match just lost: where the opponent served and hit, and how many of the opponent's shots the player read right. It costs $100 at skill 0.30, $20 more per 0.1 above that, in $10 steps.
 
-Draws are seeded by level (equal skills in random order). The quarterfinals are 1st v 3rd and 5th v 7th in the top half, 2nd v 4th and 6th v 8th in the bottom half: first-round opponents are never more than two places apart, and the two strongest can only meet in the final. In a short draw the weakest places are empty, and whoever is drawn against one gets a bye.
+Draws use classic tennis seeding by skill (equal skills in random order), and the bracket shows each player's seed. The quarterfinals are 1 v 8 and 4 v 5 in the top half, 3 v 6 and 2 v 7 in the bottom half, so 1 and 4 can meet in a semifinal and 1 and 2 only in the final. In a short draw the weakest seeds' places are empty, so the top seeds get the byes.
 
 ### Energy
 
