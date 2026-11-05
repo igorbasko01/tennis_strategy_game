@@ -1,0 +1,13 @@
+# Cloudflare Worker for online play. Deployed by .github/workflows/deploy-server.yml.
+name = "tennis-strategy"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tennis-strategy"
+database_id = "30381f56-304a-4678-8ecc-a342bdc702bd"
+migrations_dir = "migrations"
+
+[observability]
+enabled = true

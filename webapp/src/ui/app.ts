@@ -1,5 +1,7 @@
 import { duelVerdict, type FactorId } from '../engine/verdict';
 import { matchReview, type BestRead } from '../engine/review';
+import { ONLINE_SKILL, replayRng, type ResolvedExchange } from '../engine/online';
+import { api, ApiError, displayName, inviteLink, loadIdentity, saveIdentity, type MatchView } from '../online/client';
 import {
   ATTACK_ACTIONS,
   ATTACK_COST,
@@ -176,11 +178,33 @@ interface MatchSetup {
   cpuStyle: StyleId;
   /** Energy going in: [player, CPU]. Tournament matches carry it from the previous round. */
   energy: [number, number];
+  /** Set for a match against a real person over the network. */
+  online?: OnlineSession;
 }
+
+/** A live online match: the server decides each exchange; the browser mirrors it as player 0. */
+interface OnlineSession {
+  id: string;
+  token: string;
+  firstServer: PlayerIndex;
+  /** Exchanges this browser has played so far. */
+  played: number;
+  /** Exchanges already played before this browser (re)joined, replayed instantly at the start. */
+  backlog: ResolvedExchange[];
+  /** True when our choice for the current exchange was sent before a reload. */
+  locked: boolean;
+  /** The latest view of the match from the server. */
+  view: MatchView;
+}
+
+const POLL_MS = 1000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 const fmt = (n: number) => (n >= 0 ? '+' : '−') + Math.abs(n).toFixed(2);
+const fmtRating = (n: number) => (n >= 0 ? '+' : '−') + Math.abs(n);
 const fmt1 = (n: number) => (n >= 0 ? '+' : '−') + Math.abs(n).toFixed(1);
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -243,6 +267,13 @@ export class App {
   /** Bumped whenever a match is abandoned so stale async flows stop. */
   private generation = 0;
   private markerTap: ((id: string) => void) | null = null;
+  private identity = loadIdentity();
+  /** A match code from an invite link, joined once the player has an identity. */
+  private pendingJoin: string | null = null;
+  /** Bumped to stop the online screens' background polling. */
+  private onlineGen = 0;
+  /** An unfinished online match found on the server, offered for resuming. */
+  private activeOnline: MatchView | null = null;
 
   constructor() {
     this.scene = new CourtScene($('#stage'));
@@ -255,6 +286,16 @@ export class App {
     this.bindMenu();
     this.renderHelp();
     this.renderScoreboard();
+
+    void this.checkActiveOnline();
+
+    // An invite link (?join=CODE) opens straight into joining that match.
+    const joinCode = new URLSearchParams(window.location.search).get('join');
+    if (joinCode) {
+      history.replaceState(null, '', window.location.pathname);
+      this.pendingJoin = joinCode.toUpperCase();
+      this.renderOnline();
+    }
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -273,6 +314,10 @@ export class App {
     const menu = $('#menu');
     const practice = $('#practice');
     menu.querySelector('[data-act="practice"]')!.addEventListener('click', () => this.showScreen('practice'));
+    menu.querySelector('[data-act="online"]')!.addEventListener('click', () => {
+      this.sound.unlock();
+      this.renderOnline();
+    });
     menu.querySelector('[data-act="settings"]')!.addEventListener('click', () => this.renderSettings());
     menu.querySelector('[data-act="profile"]')!.addEventListener('click', () => this.renderProfile());
     menu.querySelector('[data-act="rankings"]')!.addEventListener('click', () => this.renderRankings());
@@ -313,6 +358,8 @@ export class App {
       this.startMatch(this.practiceSetup());
     });
     $('#resume').addEventListener('click', () => this.showScreen(null));
+    $('#resume-online').addEventListener('click', () => this.resumeOnline());
+    $('#resign').addEventListener('click', () => void this.resignOnline());
     for (const b of document.querySelectorAll('[data-open-help]')) {
       b.addEventListener('click', () => $('#help').classList.remove('hidden'));
     }
@@ -323,9 +370,14 @@ export class App {
   }
 
   /** Shows one full-screen overlay (or none, to reveal the match). */
-  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'profile' | 'rankings' | 'settings' | 'over' | null): void {
-    for (const id of ['menu', 'practice', 'tournament', 'profile', 'rankings', 'settings', 'over']) $(`#${id}`).classList.toggle('hidden', id !== screen);
-    $('#resume').classList.toggle('hidden', !(this.match && !this.match.isOver));
+  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'profile' | 'rankings' | 'settings' | 'over' | 'online' | null): void {
+    for (const id of ['menu', 'practice', 'tournament', 'profile', 'rankings', 'settings', 'over', 'online']) $(`#${id}`).classList.toggle('hidden', id !== screen);
+    const playing = !!(this.match && !this.match.isOver);
+    $('#resume').classList.toggle('hidden', !playing);
+    $('#resign').classList.toggle('hidden', !(playing && this.setup?.online));
+    const resumable = !playing && this.activeOnline;
+    $('#resume-online').classList.toggle('hidden', !resumable);
+    if (resumable) $('#resume-online').textContent = `Resume online match vs ${this.activeOnline!.opponent?.nickname ?? 'opponent'}`;
   }
 
   private practiceSetup(): MatchSetup {
@@ -346,7 +398,7 @@ export class App {
     this.setup = setup;
     this.names = setup.names;
     this.matchLog = [];
-    const firstServer: PlayerIndex = Math.random() < 0.5 ? 0 : 1;
+    const firstServer: PlayerIndex = setup.online ? setup.online.firstServer : Math.random() < 0.5 ? 0 : 1;
     this.ai = new AiOpponent(Math.random, STYLES[setup.cpuStyle]);
     this.match = new Match(
       [
@@ -357,11 +409,24 @@ export class App {
       firstServer,
       setup.energy,
     );
+    const online = setup.online;
+    if (online && online.backlog.length) {
+      // Resuming: replay what was already played, instantly.
+      for (const x of online.backlog) {
+        this.match.submit(0, x.choices[0]);
+        this.match.submit(1, x.choices[1]);
+        this.matchLog.push(...this.match.resolve(replayRng(x.rolls)).exchange.duels);
+      }
+      online.played = online.backlog.length;
+      online.backlog = [];
+      this.activeOnline = null;
+    }
     this.showScreen(null);
     this.scene.animator.speed = 1;
-    void this.scene.resetPoint(firstServer, 'deuce', false);
+    void this.scene.resetPoint(this.match.server, this.match.score.serveSide, false);
     this.renderScoreboard();
-    this.callout(`${this.names[firstServer]} to serve`, 'Coin toss');
+    if (online && online.played > 0) this.callout('Match resumed', `${this.names[0]} ${this.match.score.games[0]}–${this.match.score.games[1]} ${this.names[1]}`);
+    else this.callout(`${this.names[firstServer]} to serve`, 'Coin toss');
     void this.run(this.generation);
   }
 
@@ -369,13 +434,29 @@ export class App {
     const match = this.match!;
     const alive = () => gen === this.generation;
     while (alive() && !match.isOver) {
-      const choice = await this.choose(0);
+      const lockedBefore = this.setup?.online?.locked ?? false;
+      if (this.setup?.online) this.setup.online.locked = false;
+      const choice = lockedBefore ? null : await this.choose(0);
       if (!alive()) return;
-      match.submit(0, choice);
-      match.submit(1, this.ai.choose(match, 1));
+      let rng: () => number = Math.random;
+      if (this.setup?.online) {
+        // The server resolves the exchange; it may have chosen for us if our time ran out.
+        const resolved = await this.onlineExchange(gen, this.setup.online, choice);
+        if (!alive()) return;
+        if (!resolved) {
+          this.renderOnlineEnded(this.setup.online.view);
+          return;
+        }
+        match.submit(0, resolved.choices[0]);
+        match.submit(1, resolved.choices[1]);
+        rng = replayRng(resolved.rolls);
+      } else {
+        match.submit(0, choice!);
+        match.submit(1, this.ai.choose(match, 1));
+      }
 
       const choices = [...match.lockedChoices] as [Choice, Choice];
-      const outcome = match.resolve(Math.random);
+      const outcome = match.resolve(rng);
       this.matchLog.push(...outcome.exchange.duels);
 
       this.renderRevealing(choices);
@@ -392,7 +473,10 @@ export class App {
         await this.scene.resetPoint(match.server, match.score.serveSide, true);
       }
     }
-    if (alive() && match.isOver) this.renderMatchOver();
+    if (alive() && match.isOver) {
+      if (this.setup?.online) await this.settleOnline(gen, this.setup.online);
+      if (alive()) this.renderMatchOver();
+    }
   }
 
   /** Lets player p pick both halves of their bundled decision. */
@@ -465,7 +549,6 @@ export class App {
 
     const selected: Record<'target' | 'read', string | null> = { target: null, read: null };
     const lock = panel.querySelector<HTMLButtonElement>('.lock')!;
-
     const refresh = () => {
       for (const b of panel.querySelectorAll<HTMLButtonElement>('.opt')) {
         const on = selected[b.dataset.group as 'target' | 'read'] === b.dataset.id;
@@ -508,6 +591,355 @@ export class App {
         else if (kind === 'receiver') resolve({ kind, anticipation: r as never, returnTarget: t as never });
         else resolve({ kind, attack: t as never, anticipation: r as never });
       });
+    });
+  }
+
+  // ---------------------------------------------------------------- online match
+
+  /** Sends our choice, then waits until the server has resolved the exchange (or the match ended). */
+  private async onlineExchange(gen: number, s: OnlineSession, choice: Choice | null): Promise<ResolvedExchange | null> {
+    const alive = () => gen === this.generation;
+    let failures = 0;
+    // No choice means it was already sent before a reload: just wait for the result.
+    let sent = choice === null;
+    if (sent) this.renderOnlineWaiting();
+    for (;;) {
+      if (!alive()) return null;
+      try {
+        const view = sent || !choice ? await api.get(s.token, s.id, s.played) : await api.move(s.token, s.id, s.played, choice, s.played);
+        sent = true;
+        failures = 0;
+        this.updateOnline(s, view);
+        if (view.exchanges.length > 0) {
+          s.played++;
+          return view.exchanges[0];
+        }
+        if (view.status !== 'playing') return null;
+        this.renderOnlineWaiting();
+      } catch (e) {
+        failures++;
+        if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 409) {
+          this.renderOnlineWaiting(e.message);
+          return null;
+        }
+        this.renderOnlineWaiting(failures > 2 ? 'Reconnecting…' : undefined);
+      }
+      await sleep(failures ? Math.min(5000, POLL_MS * 2 ** failures) : POLL_MS);
+    }
+  }
+
+  private updateOnline(s: OnlineSession, view: MatchView): void {
+    s.view = view;
+  }
+
+  /** While waiting for the opponent's choice. */
+  private renderOnlineWaiting(note?: string): void {
+    $('#panel').innerHTML = `
+      <div class="panel-head">
+        <span class="role">Locked in</span>
+      </div>
+      <p class="waiting">${escapeHtml(note ?? `${this.names[1]} is choosing…`)}</p>`;
+  }
+
+  /** After the last exchange: waits for the server to record the result and the rating change. */
+  private async settleOnline(gen: number, s: OnlineSession): Promise<void> {
+    for (let i = 0; i < 10 && gen === this.generation && s.view.status === 'playing'; i++) {
+      try {
+        this.updateOnline(s, await api.get(s.token, s.id, s.played));
+      } catch {
+        // Keep what we have; the result screen still shows the score.
+      }
+      if (s.view.status === 'playing') await sleep(POLL_MS);
+    }
+    const me = s.view.you;
+    if (this.identity && me) {
+      this.identity = { ...this.identity, player: { ...this.identity.player, rating: me.rating } };
+      saveIdentity(this.identity);
+    }
+  }
+
+  /** The match ended without being played out: someone resigned. */
+  private renderOnlineEnded(view: MatchView): void {
+    const title = view.winner === null ? 'Match ended' : view.winner === 0 ? 'You win!' : `${this.names[1]} wins`;
+    const why = view.resigned === 0 ? 'You resigned.' : view.resigned === 1 ? `${this.names[1]} resigned.` : '';
+    this.renderOnlineCard(`
+      <h2>${escapeHtml(title)}</h2>
+      ${why ? `<p class="tagline">${escapeHtml(why)}</p>` : ''}
+      ${view.ratingChange === null ? '' : `<p class="tagline">Online rating ${fmtRating(view.ratingChange)}</p>`}
+      <button class="primary big" data-act="online-home">Back to online</button>
+      <button class="ghost" data-act="menu">Main menu</button>`);
+    this.match = null;
+    $('#panel').innerHTML = '';
+  }
+
+  /** Looks on the server for an unfinished online match to offer resuming. */
+  private async checkActiveOnline(): Promise<void> {
+    if (!this.identity) return;
+    try {
+      this.activeOnline = (await api.active(this.identity.token)).match;
+    } catch {
+      this.activeOnline = null;
+    }
+    if (!$('#menu').classList.contains('hidden')) this.showScreen('menu');
+  }
+
+  private resumeOnline(): void {
+    const view = this.activeOnline;
+    if (!view || !this.identity) return;
+    this.sound.unlock();
+    this.startOnlineMatch(view, this.identity.token, true);
+  }
+
+  private async resignOnline(): Promise<void> {
+    const s = this.setup?.online;
+    if (!s || !window.confirm(`Resign against ${this.names[1]}? It counts as a loss.`)) return;
+    try {
+      const view = await api.resign(s.token, s.id);
+      this.generation++;
+      this.renderOnlineEnded(view);
+    } catch (e) {
+      window.alert((e as Error).message);
+    }
+  }
+
+  private startOnlineMatch(view: MatchView, token: string, resume = false): void {
+    this.onlineGen++;
+    this.startMatch({
+      names: ['You', view.opponent?.nickname ?? 'Opponent'],
+      skills: [ONLINE_SKILL, ONLINE_SKILL],
+      scoring: MATCH_SCORING,
+      tournament: false,
+      cpuStyle: 'balanced',
+      energy: [FULL_ENERGY, FULL_ENERGY],
+      online: {
+        id: view.id,
+        token,
+        firstServer: view.firstServer,
+        played: 0,
+        backlog: resume ? view.exchanges : [],
+        locked: resume && view.current.youLocked,
+        view,
+      },
+    });
+  }
+
+  // ---------------------------------------------------------------- online screens
+
+  private renderOnlineCard(html: string): void {
+    const el = $('#online');
+    el.innerHTML = `<div class="menu-card online">${html}</div>`;
+    this.showScreen('online');
+    el.querySelector('[data-act="menu"]')?.addEventListener('click', () => {
+      this.onlineGen++;
+      this.showScreen('menu');
+    });
+    el.querySelector('[data-act="online-home"]')?.addEventListener('click', () => this.renderOnline());
+  }
+
+  /** The online home screen, or the nickname form the first time. */
+  private renderOnline(error = ''): void {
+    this.onlineGen++;
+    const id = this.identity;
+    if (!id) {
+      this.renderOnlineCard(`
+        <h2>Play online</h2>
+        <p class="tagline">Play against friends. Online matches are at equal skill: only your decisions count.</p>
+        <label class="field"><span class="setting-label">Choose a nickname</span>
+          <input id="nickname" maxlength="16" autocomplete="nickname" placeholder="e.g. Igor" /></label>
+        ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
+        <button class="primary big" data-act="register">Continue</button>
+        <button class="ghost" data-act="restore">I have a recovery code</button>
+        <button class="ghost" data-act="menu">Main menu</button>`);
+      const input = $('#online').querySelector<HTMLInputElement>('#nickname')!;
+      const go = async () => {
+        if (!input.value.trim()) return;
+        try {
+          this.identity = await api.register(input.value);
+          saveIdentity(this.identity);
+          this.renderOnline();
+        } catch (e) {
+          this.renderOnline((e as Error).message);
+        }
+      };
+      input.addEventListener('keydown', (e) => e.key === 'Enter' && void go());
+      $('#online').querySelector('[data-act="register"]')!.addEventListener('click', () => void go());
+      $('#online').querySelector('[data-act="restore"]')!.addEventListener('click', () => this.renderOnlineRestore());
+      return;
+    }
+    if (this.pendingJoin) {
+      const code = this.pendingJoin;
+      this.pendingJoin = null;
+      void this.joinOnline(code);
+      return;
+    }
+    this.renderOnlineCard(`
+      <h2>Play online</h2>
+      <p class="tagline">${escapeHtml(displayName(id.player))} · online rating <b>${id.player.rating}</b></p>
+      ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
+      ${this.activeOnline ? `<button class="primary big" data-act="resume">Resume match vs ${escapeHtml(this.activeOnline.opponent?.nickname ?? 'opponent')}</button>` : ''}
+      <button class="primary big" data-act="invite">Invite a friend</button>
+      <button class="primary big" data-act="join">Join with a code</button>
+      <button class="ghost" data-act="history">Online history</button>
+      <button class="ghost" data-act="recovery">Recovery code</button>
+      <button class="ghost" data-act="menu">Main menu</button>`);
+    const el = $('#online');
+    el.querySelector('[data-act="resume"]')?.addEventListener('click', () => this.resumeOnline());
+    el.querySelector('[data-act="invite"]')!.addEventListener('click', () => void this.inviteOnline());
+    el.querySelector('[data-act="join"]')!.addEventListener('click', () => this.renderOnlineJoin());
+    el.querySelector('[data-act="history"]')!.addEventListener('click', () => void this.renderOnlineHistory());
+    el.querySelector('[data-act="recovery"]')!.addEventListener('click', () => this.renderOnlineRecovery());
+    // Refresh the rating, and look for a match to resume, in the background.
+    const gen = this.onlineGen;
+    if (!this.activeOnline && !(this.match && !this.match.isOver && this.setup?.online)) {
+      api
+        .active(id.token)
+        .then(({ match }) => {
+          if (match && gen === this.onlineGen) {
+            this.activeOnline = match;
+            this.renderOnline(error);
+          }
+        })
+        .catch(() => undefined);
+    }
+    api
+      .me(id.token)
+      .then(({ player }) => {
+        this.identity = { ...id, player };
+        saveIdentity(this.identity);
+        if (gen === this.onlineGen) el.querySelector('.tagline b')!.textContent = String(player.rating);
+      })
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 401) {
+          // This device's player is gone (e.g. restored elsewhere): start again.
+          this.identity = null;
+          saveIdentity(null);
+          if (gen === this.onlineGen) this.renderOnline('This device was signed out. Choose a nickname or use your recovery code.');
+        }
+      });
+  }
+
+  private async inviteOnline(): Promise<void> {
+    const id = this.identity!;
+    let view: MatchView;
+    try {
+      view = await api.create(id.token);
+    } catch (e) {
+      this.renderOnline((e as Error).message);
+      return;
+    }
+    const link = inviteLink(view.code);
+    this.renderOnlineCard(`
+      <h2>Invite a friend</h2>
+      <p class="tagline">Send them this link, or the code to type in.</p>
+      <p class="match-code">${escapeHtml(view.code)}</p>
+      <button class="primary big" data-act="share">Share link</button>
+      <p class="small link">${escapeHtml(link)}</p>
+      <p class="waiting">Waiting for your opponent…</p>
+      <button class="ghost" data-act="online-home">Cancel</button>`);
+    $('#online').querySelector('[data-act="share"]')!.addEventListener('click', async () => {
+      const text = `Play me at Tennis Strategy! Code ${view.code}`;
+      try {
+        if (navigator.share) await navigator.share({ title: 'Tennis Strategy', text, url: link });
+        else {
+          await navigator.clipboard.writeText(link);
+          $('#online').querySelector('.link')!.textContent = 'Link copied!';
+        }
+      } catch {
+        // Share sheet dismissed.
+      }
+    });
+    const gen = this.onlineGen;
+    while (gen === this.onlineGen) {
+      await sleep(1500);
+      if (gen !== this.onlineGen) return;
+      try {
+        const v = await api.get(id.token, view.id, 0);
+        if (v.status === 'playing') {
+          this.startOnlineMatch(v, id.token);
+          return;
+        }
+      } catch {
+        // Keep waiting.
+      }
+    }
+  }
+
+  private renderOnlineJoin(error = ''): void {
+    this.renderOnlineCard(`
+      <h2>Join with a code</h2>
+      <label class="field"><span class="setting-label">Match code</span>
+        <input id="match-code" maxlength="4" autocapitalize="characters" autocomplete="off" placeholder="ABCD" /></label>
+      ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
+      <button class="primary big" data-act="go">Join</button>
+      <button class="ghost" data-act="online-home">Back</button>`);
+    const input = $('#online').querySelector<HTMLInputElement>('#match-code')!;
+    const go = () => input.value.trim() && void this.joinOnline(input.value.trim().toUpperCase());
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && go());
+    $('#online').querySelector('[data-act="go"]')!.addEventListener('click', go);
+  }
+
+  private async joinOnline(code: string): Promise<void> {
+    const id = this.identity!;
+    try {
+      const view = await api.join(id.token, code);
+      if (view.status === 'playing') this.startOnlineMatch(view, id.token);
+      else this.renderOnlineJoin('That’s your own invite. Send it to a friend.');
+    } catch (e) {
+      this.renderOnlineJoin((e as Error).message);
+    }
+  }
+
+  private async renderOnlineHistory(): Promise<void> {
+    const id = this.identity!;
+    this.renderOnlineCard(`<h2>Online history</h2><p class="tbd">Loading…</p><button class="ghost" data-act="online-home">Back</button>`);
+    try {
+      const { matches } = await api.history(id.token);
+      const rows = matches
+        .map(
+          (m) => `
+          <li>
+            <span class="result ${m.won ? 'w' : 'l'}">${m.won ? 'W' : 'L'}</span>
+            <span class="opp">${m.opponent ? escapeHtml(displayName(m.opponent)) : 'Unknown'}</span>
+            <span class="score">${m.resigned ? (m.resigned === 'you' ? 'you resigned' : 'they resigned') : m.sets.map((s) => `${s[0]}–${s[1]}`).join(' ')}</span>
+            <span class="rating">${m.ratingChange === null ? '' : fmtRating(m.ratingChange)}</span>
+          </li>`,
+        )
+        .join('');
+      this.renderOnlineCard(`
+        <h2>Online history</h2>
+        ${rows ? `<ul class="online-history">${rows}</ul>` : '<p class="tbd">No online matches yet.</p>'}
+        <button class="ghost" data-act="online-home">Back</button>`);
+    } catch (e) {
+      this.renderOnline((e as Error).message);
+    }
+  }
+
+  private renderOnlineRecovery(): void {
+    const id = this.identity!;
+    this.renderOnlineCard(`
+      <h2>Recovery code</h2>
+      <p class="tagline">Keep this code somewhere safe. On another phone or after clearing the browser, use it to get ${escapeHtml(displayName(id.player))} and your rating back.</p>
+      <p class="match-code recovery">${escapeHtml(id.recoveryCode)}</p>
+      <button class="ghost" data-act="online-home">Back</button>`);
+  }
+
+  private renderOnlineRestore(error = ''): void {
+    this.renderOnlineCard(`
+      <h2>Restore your player</h2>
+      <label class="field"><span class="setting-label">Recovery code</span>
+        <input id="recovery" autocapitalize="characters" autocomplete="off" placeholder="TENNIS-XXXX-XXXX" /></label>
+      ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
+      <button class="primary big" data-act="go">Restore</button>
+      <button class="ghost" data-act="online-home">Back</button>`);
+    const input = $('#online').querySelector<HTMLInputElement>('#recovery')!;
+    $('#online').querySelector('[data-act="go"]')!.addEventListener('click', async () => {
+      try {
+        this.identity = await api.recover(input.value);
+        saveIdentity(this.identity);
+        this.renderOnline();
+      } catch (e) {
+        this.renderOnlineRestore((e as Error).message);
+      }
     });
   }
 
@@ -677,7 +1109,7 @@ export class App {
       return `
         <div class="sb-row">
           <span class="serve-dot ${m.server === p && !m.isOver ? 'on' : ''}"></span>
-          <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}${p === 1 && this.setup ? ` <small class="style">${STYLES[this.setup.cpuStyle].icon} ${STYLES[this.setup.cpuStyle].label}</small>` : ''}</span>
+          <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}${p === 1 && this.setup && !this.setup.online ? ` <small class="style">${STYLES[this.setup.cpuStyle].icon} ${STYLES[this.setup.cpuStyle].label}</small>` : ''}</span>
           ${m.isOver ? '' : this.energyBar(m.energy[p])}
           ${sets}
           <span class="set current">${m.isOver ? '' : m.score.games[p]}</span>
@@ -742,6 +1174,11 @@ export class App {
       const prizeNote = prize > 0 ? ` · +${dollars(prize)}` : '';
       subtitle = (w === 0 ? `${roundName} won · ${skillNote}` : `Knocked out in the ${roundName.toLowerCase()} · ${skillNote}`) + prizeNote;
     }
+    const online = this.setup?.online;
+    if (online) {
+      const change = online.view.ratingChange;
+      subtitle = change === null ? 'Online match' : `Online rating ${fmtRating(change)} → ${online.view.you.rating}`;
+    }
     const el = $('#over');
     el.innerHTML = `
       <div class="menu-card">
@@ -760,13 +1197,16 @@ export class App {
         ${
           inTournament
             ? '<button class="primary big" data-act="bracket">Continue</button>'
-            : '<button class="primary big" data-act="again">Play again</button>'
+            : online
+              ? '<button class="primary big" data-act="online-home">Back to online</button>'
+              : '<button class="primary big" data-act="again">Play again</button>'
         }
         <button class="ghost" data-act="menu">Main menu</button>
       </div>`;
     this.showScreen('over');
     el.querySelector('[data-act="again"]')?.addEventListener('click', () => this.startMatch(this.setup!));
     el.querySelector('[data-act="bracket"]')?.addEventListener('click', () => this.renderTournament());
+    el.querySelector('[data-act="online-home"]')?.addEventListener('click', () => this.renderOnline());
     el.querySelector('[data-act="coach"]')?.addEventListener('click', () => {
       this.storeTournament(buyCoaching(this.tournament!));
       savePlayerSkill(this.tournament!.entrants[HUMAN].skill);
@@ -1122,6 +1562,11 @@ export class App {
       <p>Every CPU player has a style it always plays with. It doesn't learn from you, but it leans on its favourite
       choices, so watch what your opponent does and adapt. Styles are dealt out again when you start fresh.</p>
       <ul>${STYLE_IDS.map((id) => `<li>${STYLES[id].icon} <b>${STYLES[id].label}</b>: ${STYLES[id].description}</li>`).join('')}</ul>
+      <h3>Playing online</h3>
+      <p>Play online invites a friend by link or code. Both of you play at skill 0.50, so only your decisions and the
+      dice count. Choices are revealed together once both of you have locked in, and there's no time limit. If you
+      reload or come back later, Resume online match picks up where you left off; Resign (in the menu) ends it as a loss. Your
+      online rating starts at 1000 and moves like chess Elo; it's separate from your career skill.</p>
       <h3>Serve vs. read</h3>
       <p class="small">Rows: serve (risk). Columns: receiver's read.</p>
       ${serveTable}
