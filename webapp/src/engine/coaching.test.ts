@@ -64,7 +64,23 @@ describe('coaching', () => {
     expect(Object.values(r.serves).reduce((a, b) => a + b, 0)).toBe(theirs.filter((d) => d.kind === 'serve').length);
     expect(Object.values(r.shots).reduce((a, b) => a + b, 0)).toBe(theirs.filter((d) => d.kind !== 'serve').length);
     expect(r.readsRight).toBe(theirs.filter((d) => d.readCalc.modifier > 0).length);
-    expect(r.misreadCost).toBeLessThanOrEqual(0);
+    // Every misread the opponent's shot got past ended the point.
+    expect(r.misreadsLost).toBe(theirs.filter((d) => d.readCalc.modifier <= 0 && d.hitterWins).length);
+    expect(r.misreadsLost).toBeLessThanOrEqual(r.reads - r.readsRight);
+    // The best cover is the shot they hit most, and the best serve read matches their most common serve.
+    expect(r.bestCover.right).toBe(Math.max(...Object.values(r.shots)));
+    expect(r.bestCover.of).toBe(Object.values(r.shots).reduce((a, b) => a + b, 0));
+    for (const k of r.bestCover.reads) expect(r.shots[k]).toBe(r.bestCover.right);
+    expect(r.bestServeRead.of).toBe(Object.values(r.serves).reduce((a, b) => a + b, 0));
     expect(m.stats[0].readsCorrect).toBe(r.readsRight);
+  });
+
+  it('maps serves to the read that is right against them', () => {
+    const duel = (shot: string, hitterWins: boolean, modifier: number) =>
+      ({ kind: 'serve', hitter: 1, defender: 0, shot, read: 'neutral', hitterWins, scramble: 0, readCalc: { modifier }, shotCalc: {} }) as unknown as Duel;
+    const r = matchReview([duel('body', false, 0.3), duel('body', true, -0.3), duel('wide', true, -0.4), duel('body', false, -0.3)], 0);
+    expect(r.bestServeRead).toEqual({ reads: ['neutral'], right: 3, of: 4 });
+    expect(r.misreadsLost).toBe(2);
+    expect(r.bestCover).toEqual({ reads: [], right: 0, of: 0 });
   });
 });
