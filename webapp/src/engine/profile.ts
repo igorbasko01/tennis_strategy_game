@@ -38,6 +38,8 @@ export interface TournamentRecord {
   endSkill: number;
   /** Prize money won, in dollars. */
   prize: number;
+  /** Money spent on coaching, in dollars. */
+  coaching: number;
   matches: TournamentMatchRecord[];
 }
 
@@ -85,7 +87,7 @@ export const summarizeTournament = (t: Tournament): TournamentRecord => {
       score: won ? mine.score : flipScore(mine.score),
     });
   });
-  return { number: t.number, status: t.status, tier: t.tier, startSkill: t.startSkill, endSkill: t.entrants[HUMAN].skill, prize: prizeMoney(t), matches };
+  return { number: t.number, status: t.status, tier: t.tier, startSkill: t.startSkill, endSkill: t.entrants[HUMAN].skill, prize: prizeMoney(t), coaching: t.coaching ?? 0, matches };
 };
 
 /** Adds or replaces the record for a tournament, keyed by its number. */
@@ -114,12 +116,12 @@ export const recordSkippedTournament = (p: Profile, cpus: Entrant[], startSkill:
     energy[c.name] = c.energy ?? FULL_ENERGY;
   }
   energy.You = restBySkipping(energy.You ?? FULL_ENERGY);
-  const record: TournamentRecord = { number, status: 'skipped', startSkill, endSkill, prize: 0, matches: [] };
+  const record: TournamentRecord = { number, status: 'skipped', startSkill, endSkill, prize: 0, coaching: 0, matches: [] };
   return { ...p, roster, energy, nextTournament: number + 1, tournaments: [...p.tournaments, record] };
 };
 
-/** All prize money the player has won, in dollars. */
-export const balance = (p: Profile): number => p.tournaments.reduce((sum, t) => sum + (t.prize ?? 0), 0);
+/** The player's money: prize money won less what was spent on coaching, in dollars. */
+export const balance = (p: Profile): number => p.tournaments.reduce((sum, t) => sum + (t.prize ?? 0) - (t.coaching ?? 0), 0);
 
 export const profileStats = (p: Profile) => {
   const matches = p.tournaments.flatMap((t) => t.matches);

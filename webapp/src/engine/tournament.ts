@@ -76,6 +76,8 @@ export interface Tournament {
   number: number;
   /** The draw the human plays in. */
   tier: Tier;
+  /** Price paid for a coaching review after being knocked out; absent when none was bought. */
+  coaching?: number;
   /** The human's skill when the tournament began. */
   startSkill: number;
   entrants: Entrant[];
@@ -286,6 +288,26 @@ export const playTournamentWithoutPlayer = (
 export const updateEnergies = (energies: Energies, t: Tournament): Energies => {
   const next = { ...energies };
   for (const e of [...t.entrants, ...(t.background ?? [])]) next[e.name] = e.energy ?? FULL_ENERGY;
+  return next;
+};
+
+/** Skill a coaching review adds: less than a match against an equal (0.04) can. */
+export const COACHING_GAIN = 0.01;
+
+/** A coaching review costs $100 at the starting skill and $20 more per 0.1 above it, in $10 steps. */
+export const coachingPrice = (skill: number): number =>
+  Math.max(100, Math.round((100 + (skill - TOURNAMENT_START_SKILL) * 200) / 10) * 10);
+
+/** One coaching review is on offer per tournament, once the player is knocked out. */
+export const canBuyCoaching = (t: Tournament): boolean => t.status === 'lost' && t.coaching === undefined;
+
+/** Pays for a coaching review: the price is recorded and the player gains COACHING_GAIN. */
+export const buyCoaching = (t: Tournament): Tournament => {
+  if (!canBuyCoaching(t)) throw new Error('Coaching is only offered once, after being knocked out');
+  const next: Tournament = structuredClone(t);
+  const human = next.entrants[HUMAN];
+  next.coaching = coachingPrice(human.skill);
+  human.skill = Math.min(MAX_SKILL, round2(human.skill + COACHING_GAIN));
   return next;
 };
 
