@@ -1,4 +1,5 @@
 import { duelVerdict, type FactorId } from '../engine/verdict';
+import { matchReview } from '../engine/review';
 import {
   ATTACK_ACTIONS,
   ATTACK_COST,
@@ -46,6 +47,10 @@ import {
   decaySkill,
   pairings,
   prizeMoney,
+  buyCoaching,
+  canBuyCoaching,
+  coachingPrice,
+  COACHING_GAIN,
   parseTournament,
   playTournamentWithoutPlayer,
   recordHumanMatch,
@@ -229,6 +234,8 @@ export class App {
   private match: Match | null = null;
   private ai = new AiOpponent();
   private names: [string, string] = ['You', 'CPU'];
+  /** Every duel of the current match, for the coaching review. */
+  private matchLog: Duel[] = [];
   private setup: MatchSetup | null = null;
   private tournament = loadTournament();
   private profile = loadProfile();
@@ -337,6 +344,7 @@ export class App {
     this.generation++;
     this.setup = setup;
     this.names = setup.names;
+    this.matchLog = [];
     const firstServer: PlayerIndex = Math.random() < 0.5 ? 0 : 1;
     this.ai = new AiOpponent(Math.random, STYLES[setup.cpuStyle]);
     this.match = new Match(
@@ -367,6 +375,7 @@ export class App {
 
       const choices = [...match.lockedChoices] as [Choice, Choice];
       const outcome = match.resolve(Math.random);
+      this.matchLog.push(...outcome.exchange.duels);
 
       this.renderRevealing(choices);
       await this.scene.playExchange(outcome.exchange);
@@ -746,6 +755,7 @@ export class App {
             <tr><td>Longest rally</td><td colspan="2">${st[0].longestRally} shots</td></tr>
           </tbody>
         </table>
+        ${inTournament && this.tournament && canBuyCoaching(this.tournament) ? this.coachingOffer() : ''}
         ${
           inTournament
             ? '<button class="primary big" data-act="bracket">Continue</button>'
@@ -756,8 +766,46 @@ export class App {
     this.showScreen('over');
     el.querySelector('[data-act="again"]')?.addEventListener('click', () => this.startMatch(this.setup!));
     el.querySelector('[data-act="bracket"]')?.addEventListener('click', () => this.renderTournament());
+    el.querySelector('[data-act="coach"]')?.addEventListener('click', () => {
+      this.storeTournament(buyCoaching(this.tournament!));
+      savePlayerSkill(this.tournament!.entrants[HUMAN].skill);
+      el.querySelector('.coaching')!.outerHTML = this.coachingReview();
+    });
     el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
     $('#panel').innerHTML = '';
+  }
+
+  /** After a tournament loss: a coaching review for sale, if the player can afford it. */
+  private coachingOffer(): string {
+    const price = coachingPrice(loadPlayerSkill());
+    const money = balance(this.profile);
+    const short = money < price;
+    return `
+      <div class="coaching">
+        <p>A coach can go over this match with you: what ${escapeHtml(this.names[1])} kept doing and how you read it. <b>+${COACHING_GAIN.toFixed(2)} skill</b>.</p>
+        <button class="ghost" data-act="coach" ${short ? 'disabled' : ''}>Coaching review · ${dollars(price)}</button>
+        <p class="small">You have ${dollars(money)}${short ? ` · ${dollars(price - money)} short` : ''}</p>
+      </div>`;
+  }
+
+  /** What the coach found in the match just lost. */
+  private coachingReview(): string {
+    const r = matchReview(this.matchLog, 0);
+    const opp = escapeHtml(this.names[1]);
+    const list = <K extends string>(counts: Record<K, number>, label: Record<K, string>) =>
+      (Object.keys(counts) as K[])
+        .filter((k) => counts[k] > 0)
+        .sort((a, b) => counts[b] - counts[a])
+        .map((k) => `${label[k]} ${counts[k]}`)
+        .join(' · ') || 'none';
+    return `
+      <div class="coaching review">
+        <h3>Coach’s review · skill +${COACHING_GAIN.toFixed(2)}</h3>
+        <p><b>${opp} served:</b> ${list(r.serves, SERVE_LABEL)}</p>
+        <p><b>${opp} hit:</b> ${list(r.shots, ATTACK_LABEL)}</p>
+        <p><b>Your reads:</b> ${r.readsRight} of ${r.reads} right${r.misreadCost < 0 ? ` · misreads cost ${fmt(r.misreadCost)} in total` : ''}</p>
+        <p class="small">Players keep their habits. Next time you meet ${opp}, read for what they did most.</p>
+      </div>`;
   }
 
   // ---------------------------------------------------------------- tournament
@@ -802,7 +850,7 @@ export class App {
         <div class="next-match">
           <div><span class="setting-label">Your energy</span><b>${Math.round(energy * 100)}%</b></div>
           <div><span class="setting-label">Your skill</span><b>${loadPlayerSkill().toFixed(2)}</b></div>
-          <div><span class="setting-label">Prize money</span><b>${dollars(balance(this.profile))}</b></div>
+          <div><span class="setting-label">Money</span><b>${dollars(balance(this.profile))}</b></div>
         </div>
         <button class="primary big" data-act="enter">Enter tournament</button>
         <button class="ghost" data-act="skip" ${rested <= energy ? 'disabled' : ''}>Skip &amp; rest (energy → ${Math.round(rested * 100)}%)</button>
@@ -901,7 +949,7 @@ export class App {
           ${
             r.status === 'skipped'
               ? ''
-              : `<p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}${r.prize ? ` · ${dollars(r.prize)} won` : ''}</p>
+              : `<p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}${r.prize ? ` · ${dollars(r.prize)} won` : ''}${r.coaching ? ` · ${dollars(r.coaching)} coaching` : ''}</p>
           ${matches ? `<ul>${matches}</ul>` : '<p class="tbd">No matches played yet</p>'}`
           }
         </section>`;
@@ -913,7 +961,7 @@ export class App {
         <h2>Profile</h2>
         <div class="stat-tiles">
           ${tile('Skill', loadPlayerSkill().toFixed(2))}
-          ${tile('Prize money', dollars(stats.prizeMoney))}
+          ${tile('Money', dollars(stats.prizeMoney))}
           ${tile('Tournaments', String(stats.tournaments))}
           ${tile('Titles', String(stats.titles))}
           ${tile('Matches', `${stats.matchesWon}–${stats.matchesLost}`)}
@@ -1082,6 +1130,7 @@ export class App {
         <li>In a tournament everyone starts at 0.30 and skill carries over from one tournament to the next. Beating a stronger player gains a lot (up to 0.06); beating a much weaker one gains almost nothing. The loser drops by the same amount.</li>
         <li>Each tournament has two draws played at the same time. Tier 1 is the strongest eight players who enter, Tier 2 the rest, so who rests moves the cut-off. The draw is seeded: in the first round you play someone close to your level, and the two strongest players can only meet in the final.</li>
         <li>Tournaments pay prize money after every match: Tier 2 pays $10 for playing the quarterfinal, then $10, $20 and $40 for winning each round ($80 for a title); Tier 1 pays $25, $25, $50 and $100 ($200).</li>
+        <li>After a tournament loss you can buy one coaching review: +0.01 skill and a look at what your opponent kept doing. It costs $100 at skill 0.30 and $20 more for every 0.1 above that.</li>
         <li>Skipping a tournament costs 0.01–0.05 skill, but never takes you below 0.30.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;
