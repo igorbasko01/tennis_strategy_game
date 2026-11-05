@@ -22,7 +22,7 @@ import {
   rollDecay,
   simulateMatch,
   splitTiers,
-  levelDraw,
+  seededDraw,
   prizeMoney,
   PRIZES,
   type Entrant,
@@ -163,21 +163,31 @@ describe('tournament', () => {
     expect(prizeMoney(lost)).toBe(10);
   });
 
-  it('pairs first-round opponents of similar skill', () => {
+  it('pairs players close in level and keeps the two strongest apart until the final', () => {
     const skills = [0.31, 0.5, 0.33, 0.45, 0.3, 0.42, 0.36, 0.48];
-    const draw = levelDraw(skills, seeded(9));
-    expect(draw.map((i) => skills[i])).toEqual([0.5, 0.48, 0.45, 0.42, 0.36, 0.33, 0.31, 0.3]);
+    const draw = seededDraw(skills, seeded(9));
+    // Quarterfinals 1st v 3rd, 5th v 7th (top half), 2nd v 4th, 6th v 8th (bottom half).
+    expect(draw.map((i) => skills[i!])).toEqual([0.5, 0.45, 0.36, 0.31, 0.48, 0.42, 0.33, 0.3]);
     // Equal skills are drawn in random order.
-    const orders = new Set([1, 2, 3, 4, 5, 6].map((seed) => levelDraw([0.3, 0.3, 0.3, 0.3], seeded(seed)).join()));
+    const orders = new Set([1, 2, 3, 4, 5, 6].map((seed) => seededDraw([0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3], seeded(seed)).join()));
     expect(orders.size).toBeGreaterThan(1);
+  });
+
+  it('pads a short draw with byes in the weakest places', () => {
+    const draw = seededDraw([0.4, 0.3, 0.5, 0.2, 0.6], seeded(1));
+    // Ranks 1-5 are 0.6, 0.5, 0.4, 0.3, 0.2; ranks 6-8 are byes.
+    expect(draw).toEqual([4, 0, 3, null, 2, 1, null, null]);
   });
 
   it('pairs the player with someone of their level in the first round', () => {
     const roster = Object.fromEntries(CPU_NAMES.map((n, i) => [n, 0.6 - i * 0.02]));
     const t = createTournament(seeded(25), 0.45, 1, roster);
     const [, opp] = pairings(t, 0).find((p) => p.includes(HUMAN))!.sort((a, b) => a - b);
-    for (const [a, b] of pairings(t, 0)) expect(Math.abs(t.entrants[a].skill - t.entrants[b].skill)).toBeLessThanOrEqual(0.06 + 1e-9);
-    expect(Math.abs(t.entrants[opp].skill - 0.45)).toBeLessThanOrEqual(0.04 + 1e-9);
+    // Opponents are at most two places apart in the draw.
+    const ranked = t.entrants.map((e) => e.skill).sort((a, b) => b - a);
+    const rank = (i: number) => ranked.indexOf(t.entrants[i].skill);
+    for (const [a, b] of pairings(t, 0)) expect(Math.abs(rank(a) - rank(b))).toBeLessThanOrEqual(2);
+    expect(Math.abs(t.entrants[opp].skill - 0.45)).toBeLessThanOrEqual(0.08 + 1e-9);
   });
 
   it('puts every CPU in a draw: seven with the player and the rest in a simultaneous background draw', () => {

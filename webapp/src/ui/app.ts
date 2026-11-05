@@ -1080,7 +1080,7 @@ export class App {
         <li>A correctly read drop shot gets a big +0.6 bonus — don't get predictable with it.</li>
         <li>Skill is added to every shot and read. In a practice match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
         <li>In a tournament everyone starts at 0.30 and skill carries over from one tournament to the next. Beating a stronger player gains a lot (up to 0.06); beating a much weaker one gains almost nothing. The loser drops by the same amount.</li>
-        <li>Each tournament has two draws played at the same time. Tier 1 is the strongest eight players who enter, Tier 2 the rest, so who rests moves the cut-off. In the first round you play someone close to your level.</li>
+        <li>Each tournament has two draws played at the same time. Tier 1 is the strongest eight players who enter, Tier 2 the rest, so who rests moves the cut-off. The draw is seeded: in the first round you play someone close to your level, and the two strongest players can only meet in the final.</li>
         <li>Tournaments pay prize money after every match: Tier 2 pays $10 for playing the quarterfinal, then $10, $20 and $40 for winning each round ($80 for a title); Tier 1 pays $25, $25, $50 and $100 ($200).</li>
         <li>Skipping a tournament costs 0.01–0.05 skill, but never takes you below 0.30.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>

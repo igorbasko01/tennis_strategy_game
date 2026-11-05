@@ -80,7 +80,7 @@ Prize money (in dollars) is paid after every tournament match, by tier:
 
 Practice matches and skipped tournaments pay nothing. The player's total is kept in the profile; CPUs don't earn money yet.
 
-First-round pairs are matched by level: the strongest two in a draw play each other, then the next two, and so on, with equal skills in random order. In a short draw the strongest players get the byes.
+Draws are seeded by level (equal skills in random order). The quarterfinals are 1st v 3rd and 5th v 7th in the top half, 2nd v 4th and 6th v 8th in the bottom half: first-round opponents are never more than two places apart, and the two strongest can only meet in the final. In a short draw the weakest places are empty, and whoever is drawn against one gets a bye.
 
 ### Energy
 
