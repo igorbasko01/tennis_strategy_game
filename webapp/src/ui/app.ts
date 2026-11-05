@@ -1,5 +1,5 @@
 import { duelVerdict, type FactorId } from '../engine/verdict';
-import { matchReview } from '../engine/review';
+import { matchReview, type BestRead } from '../engine/review';
 import {
   ATTACK_ACTIONS,
   ATTACK_COST,
@@ -799,12 +799,17 @@ export class App {
         .sort((a, b) => counts[b] - counts[a])
         .map((k) => `${label[k]} ${counts[k]}`)
         .join(' · ') || 'none';
+    const misreads = r.reads - r.readsRight;
+    const bestLine = <K extends string>(title: string, b: BestRead<K>, label: Record<K, string>) =>
+      b.reads.length ? `<p><b>${title}:</b> ${b.reads.map((k) => label[k]).join(' or ')} (right ${b.right} of ${b.of}${b.reads.length > 1 ? ' each' : ''})</p>` : '';
     return `
       <div class="coaching review">
         <h3>Coach’s review · skill +${COACHING_GAIN.toFixed(2)}</h3>
         <p><b>${opp} served:</b> ${list(r.serves, SERVE_LABEL)}</p>
         <p><b>${opp} hit:</b> ${list(r.shots, ATTACK_LABEL)}</p>
-        <p><b>Your reads:</b> ${r.readsRight} of ${r.reads} right${r.misreadCost < 0 ? ` · misreads cost ${fmt(r.misreadCost)} in total` : ''}</p>
+        <p><b>Your reads:</b> ${r.readsRight} of ${r.reads} right${misreads > 0 ? ` · <b>${r.misreadsLost} of your ${misreads} misreads lost the point straight away</b>` : ''}</p>
+        ${bestLine(`Best read on ${opp}’s serve`, r.bestServeRead, SERVE_RECEIVE_LABEL)}
+        ${bestLine(`Best cover against ${opp}’s shots`, r.bestCover, ATTACK_LABEL)}
         <p class="small">Players keep their habits. Next time you meet ${opp}, read for what they did most.</p>
       </div>`;
   }

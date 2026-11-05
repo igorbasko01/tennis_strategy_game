@@ -80,7 +80,7 @@ Prize money (in dollars) is paid after every tournament match, by tier:
 
 Practice matches and skipped tournaments pay nothing. The player's total is kept in the profile; CPUs don't earn money yet.
 
-After being knocked out of a tournament the player can buy one coaching review for that tournament: +0.01 skill (less than a match against an equal can give) and a summary of the match just lost: where the opponent served and hit, and how many of the opponent's shots the player read right. It costs $100 at skill 0.30, $20 more per 0.1 above that, in $10 steps.
+After being knocked out of a tournament the player can buy one coaching review for that tournament: +0.01 skill (less than a match against an equal can give) and a summary of the match just lost: where the opponent served and hit, how many of their shots the player read right, how many misreads lost the point straight away, and the single read that would have been right most often against their serve and their shots. It costs $100 at skill 0.30, $20 more per 0.1 above that, in $10 steps.
 
 Draws use classic tennis seeding by skill (equal skills in random order), and the bracket shows each player's seed. The quarterfinals are 1 v 8 and 4 v 5 in the top half, 3 v 6 and 2 v 7 in the bottom half, so 1 and 4 can meet in a semifinal and 1 and 2 only in the final. In a short draw the weakest seeds' places are empty, so the top seeds get the byes.
 
