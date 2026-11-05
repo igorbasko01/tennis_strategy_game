@@ -163,17 +163,17 @@ const loadCpus = (rng: Rng, roster: Roster, styles: Record<string, StyleId>, ene
   );
 
 /**
- * Bracket slots, by skill rank (0 = strongest), so that neighbours meet in the
- * quarterfinal: 1st v 3rd and 5th v 7th in the top half, 2nd v 4th and 6th v
- * 8th in the bottom half. First-round opponents are never more than two places
- * apart, and the two strongest can only meet in the final.
+ * Classic tennis seeding: bracket slots by seed (0 = 1st seed). Neighbours meet
+ * in the quarterfinal: 1 v 8 and 4 v 5 in the top half, 3 v 6 and 2 v 7 in the
+ * bottom half, so the top seeds open against the weakest, 1 and 4 can meet in
+ * a semifinal, and 1 and 2 only in the final.
  */
-const SEEDING = [0, 2, 4, 6, 1, 3, 5, 7];
+const SEEDING = [0, 7, 3, 4, 2, 5, 1, 6];
 
 /**
  * The draw for up to DRAW_SIZE players, given their skills: indices in bracket
  * order (see SEEDING), equal skills in random order. A short draw is padded with
- * byes (null) in the weakest players' places.
+ * byes (null) in the weakest seeds' places, so the top seeds get the byes.
  */
 export const seededDraw = (skills: readonly number[], rng: Rng): (number | null)[] => {
   const ranked = shuffled(
@@ -182,6 +182,9 @@ export const seededDraw = (skills: readonly number[], rng: Rng): (number | null)
   ).sort((a, b) => skills[b] - skills[a]);
   return SEEDING.map((rank) => ranked[rank] ?? null);
 };
+
+/** A player's seed (1 = strongest) in a tournament, from their place in the first-round draw. */
+export const seedOf = (t: Tournament, entrant: number): number => SEEDING[t.draws[0].indexOf(entrant)] + 1;
 
 /** Highest skill first; equal skills keep their order. */
 const bySkill = (players: Entrant[]) => [...players].sort((a, b) => b.skill - a.skill);

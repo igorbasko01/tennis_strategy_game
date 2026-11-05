@@ -23,6 +23,7 @@ import {
   simulateMatch,
   splitTiers,
   seededDraw,
+  seedOf,
   prizeMoney,
   PRIZES,
   type Entrant,
@@ -163,31 +164,40 @@ describe('tournament', () => {
     expect(prizeMoney(lost)).toBe(10);
   });
 
-  it('pairs players close in level and keeps the two strongest apart until the final', () => {
+  it('seeds the draw so the strongest open against the weakest and meet at the end', () => {
     const skills = [0.31, 0.5, 0.33, 0.45, 0.3, 0.42, 0.36, 0.48];
     const draw = seededDraw(skills, seeded(9));
-    // Quarterfinals 1st v 3rd, 5th v 7th (top half), 2nd v 4th, 6th v 8th (bottom half).
-    expect(draw.map((i) => skills[i!])).toEqual([0.5, 0.45, 0.36, 0.31, 0.48, 0.42, 0.33, 0.3]);
+    // Quarterfinals 1 v 8, 4 v 5 (top half), 3 v 6, 2 v 7 (bottom half).
+    expect(draw.map((i) => skills[i!])).toEqual([0.5, 0.3, 0.42, 0.36, 0.45, 0.33, 0.48, 0.31]);
     // Equal skills are drawn in random order.
     const orders = new Set([1, 2, 3, 4, 5, 6].map((seed) => seededDraw([0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3], seeded(seed)).join()));
     expect(orders.size).toBeGreaterThan(1);
   });
 
-  it('pads a short draw with byes in the weakest places', () => {
+  it('pads a short draw with byes for the top seeds', () => {
     const draw = seededDraw([0.4, 0.3, 0.5, 0.2, 0.6], seeded(1));
-    // Ranks 1-5 are 0.6, 0.5, 0.4, 0.3, 0.2; ranks 6-8 are byes.
-    expect(draw).toEqual([4, 0, 3, null, 2, 1, null, null]);
+    // Seeds 1-5 are 0.6, 0.5, 0.4, 0.3, 0.2; seeds 6-8 are byes, drawn against seeds 1-3.
+    expect(draw).toEqual([4, null, 1, 3, 0, null, 2, null]);
   });
 
-  it('pairs the player with someone of their level in the first round', () => {
+  it('numbers each player’s seed', () => {
     const roster = Object.fromEntries(CPU_NAMES.map((n, i) => [n, 0.6 - i * 0.02]));
     const t = createTournament(seeded(25), 0.45, 1, roster);
-    const [, opp] = pairings(t, 0).find((p) => p.includes(HUMAN))!.sort((a, b) => a - b);
-    // Opponents are at most two places apart in the draw.
-    const ranked = t.entrants.map((e) => e.skill).sort((a, b) => b - a);
-    const rank = (i: number) => ranked.indexOf(t.entrants[i].skill);
-    for (const [a, b] of pairings(t, 0)) expect(Math.abs(rank(a) - rank(b))).toBeLessThanOrEqual(2);
-    expect(Math.abs(t.entrants[opp].skill - 0.45)).toBeLessThanOrEqual(0.08 + 1e-9);
+    const seeds = t.entrants.map((_, i) => seedOf(t, i));
+    expect([...seeds].sort()).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    // Seed order follows skill.
+    const bySeed = [...t.entrants.keys()].sort((a, b) => seeds[a] - seeds[b]).map((i) => t.entrants[i].skill);
+    expect(bySeed).toEqual([...bySeed].sort((a, b) => b - a));
+    // The 1st seed opens against the 8th.
+    const top = seeds.indexOf(1);
+    const [a, b] = pairings(t, 0).find((p) => p.includes(top))!;
+    expect(seedOf(t, a === top ? b : a)).toBe(8);
+  });
+
+  it('pairs seeds that add up to nine in the first round', () => {
+    const roster = Object.fromEntries(CPU_NAMES.map((n, i) => [n, 0.6 - i * 0.02]));
+    const t = createTournament(seeded(25), 0.45, 1, roster);
+    for (const [a, b] of pairings(t, 0)) expect(seedOf(t, a) + seedOf(t, b)).toBe(9);
   });
 
   it('puts every CPU in a draw: seven with the player and the rest in a simultaneous background draw', () => {
