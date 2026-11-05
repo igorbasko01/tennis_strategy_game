@@ -31,6 +31,7 @@ interface MatchRow {
   seed: number;
   status: 'waiting' | 'playing' | 'finished';
   winner: number | null;
+  resigned: number | null;
   rating_change: number | null;
   created_at: number;
   finished_at: number | null;
@@ -163,16 +164,16 @@ const insertMove = (env: Env, matchId: string, exchange: number, seat: number, c
     .run();
 
 /** Ends a match once, and moves both players' ratings. */
-const finish = async (env: Env, m: MatchRow, winner: PlayerIndex) => {
+const finish = async (env: Env, m: MatchRow, winner: PlayerIndex, resigned: PlayerIndex | null = null) => {
   const players = await env.DB.prepare('SELECT id, rating FROM players WHERE id IN (?, ?)').bind(m.seat0, m.seat1).all<{ id: string; rating: number }>();
   const rating = (id: string | null) => players.results.find((p) => p.id === id)?.rating ?? 1000;
   const [w, l] = winner === 0 ? [m.seat0, m.seat1!] : [m.seat1!, m.seat0];
   const change = ratingChange(rating(w), rating(l));
   const now = Date.now();
   const done = await env.DB.prepare(
-    "UPDATE matches SET status = 'finished', winner = ?, rating_change = ?, finished_at = ? WHERE id = ? AND status = 'playing'",
+    "UPDATE matches SET status = 'finished', winner = ?, resigned = ?, rating_change = ?, finished_at = ? WHERE id = ? AND status = 'playing'",
   )
-    .bind(winner, change, now, m.id)
+    .bind(winner, resigned, change, now, m.id)
     .run();
   if (done.meta.changes === 1) {
     await env.DB.batch([
@@ -224,6 +225,7 @@ const view = async (env: Env, m: MatchRow, seat: PlayerIndex, since = 0) => {
       opponentLocked: pending[1 - seat] !== null,
     },
     winner: orient(m.winner),
+    resigned: orient(m.resigned),
     ratingChange: m.rating_change === null || won === null ? null : won ? m.rating_change : -m.rating_change,
   });
 };
@@ -284,6 +286,28 @@ const submitMove = async (req: Request, me: PlayerRow, env: Env, id: string) => 
   return view(env, await advance(env, id), seat, Number(data.since ?? 0));
 };
 
+/** The player's unfinished match, if any, with every exchange so far so the browser can catch up. */
+const activeMatch = async (me: PlayerRow, env: Env) => {
+  const m = await env.DB.prepare(
+    "SELECT * FROM matches WHERE (seat0 = ? OR seat1 = ?) AND status = 'playing' ORDER BY started_at DESC LIMIT 1",
+  )
+    .bind(me.id, me.id)
+    .first<MatchRow>();
+  if (!m) return json({ match: null });
+  const current = await advance(env, m.id);
+  if (current.status !== 'playing') return json({ match: null });
+  const res = await view(env, current, seatOf(current, me.id));
+  return json({ match: await res.json() });
+};
+
+/** Ends the match as a loss for the player who resigns. */
+const resign = async (me: PlayerRow, env: Env, id: string) => {
+  const m = await advance(env, id);
+  const seat = seatOf(m, me.id);
+  if (m.status === 'playing') await finish(env, m, (1 - seat) as PlayerIndex, seat);
+  return view(env, await loadMatch(env, id), seat);
+};
+
 const history = async (me: PlayerRow, env: Env) => {
   const { results } = await env.DB.prepare(
     "SELECT * FROM matches WHERE (seat0 = ? OR seat1 = ?) AND status = 'finished' ORDER BY finished_at DESC LIMIT 20",
@@ -309,6 +333,7 @@ const history = async (me: PlayerRow, env: Env) => {
       finishedAt: m.finished_at,
       opponent: opp ? publicPlayer(opp) : null,
       won,
+      resigned: m.resigned === null ? null : m.resigned === seat ? 'you' : 'opponent',
       sets: match.score.completedSets.map((s) => (seat === 0 ? s : [s[1], s[0]])),
       ratingChange: m.rating_change === null ? null : won ? m.rating_change : -m.rating_change,
     });
@@ -330,14 +355,16 @@ const route = async (req: Request, env: Env): Promise<Response> => {
   const me = await authenticate(req, env);
   if (path === '/api/me' && method === 'GET') return json({ player: publicPlayer(me) });
   if (path === '/api/me/matches' && method === 'GET') return history(me, env);
+  if (path === '/api/me/active' && method === 'GET') return activeMatch(me, env);
   if (path === '/api/matches' && method === 'POST') return createMatch(me, env);
   if (path === '/api/matches/join' && method === 'POST') return joinMatch(req, me, env);
-  const matchPath = path.match(/^\/api\/matches\/([0-9a-f]{16})(\/moves)?$/);
+  const matchPath = path.match(/^\/api\/matches\/([0-9a-f]{16})(\/moves|\/resign)?$/);
   if (matchPath && !matchPath[2] && method === 'GET') {
     const m = await advance(env, matchPath[1]);
     return view(env, m, seatOf(m, me.id), Number(url.searchParams.get('since') ?? 0));
   }
-  if (matchPath && matchPath[2] && method === 'POST') return submitMove(req, me, env, matchPath[1]);
+  if (matchPath && matchPath[2] === '/moves' && method === 'POST') return submitMove(req, me, env, matchPath[1]);
+  if (matchPath && matchPath[2] === '/resign' && method === 'POST') return resign(me, env, matchPath[1]);
   throw new HttpError(404, 'Not found');
 };
 

@@ -1404,3 +1404,8 @@ td.neg {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+button.ghost.danger {
+  color: var(--bad);
+  border-color: rgba(255, 138, 115, 0.5);
+}

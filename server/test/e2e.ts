@@ -80,6 +80,21 @@ const main = async () => {
     () => assert(false, 'old token stops working after recovery'),
     () => undefined,
   );
+  // Resume and resign: a second match between them.
+  const b2 = rec; // Alice's new token after recovery
+  const m2 = await call('/api/matches', b2.token, {});
+  const none = await call('/api/me/active', b2.token);
+  assert(none.match === null, 'a waiting invite is not an unfinished match');
+  await call('/api/matches/join', b.token, { code: m2.code });
+  const active = await call('/api/me/active', b.token);
+  assert(active.match && active.match.id === m2.id && active.match.status === 'playing', 'the unfinished match is found');
+  const resigned = await call(`/api/matches/${m2.id}/resign`, b.token, {});
+  assert(resigned.status === 'finished' && resigned.winner === 1 && resigned.resigned === 0, 'resigning loses the match');
+  const seenByAlice = await call(`/api/matches/${m2.id}`, b2.token);
+  assert(seenByAlice.winner === 0 && seenByAlice.resigned === 1, 'the opponent sees the resignation as a win');
+  assert((await call('/api/me/active', b.token)).match === null, 'nothing left to resume');
+  const h2 = await call('/api/me/matches', b.token);
+  assert(h2.matches[0].resigned === 'you', 'history shows who resigned');
   console.log(`OK: ${exchange} exchanges, sets ${JSON.stringify(la.score.completedSets)}, Alice ${meA.player.rating}, Bob ${meB.player.rating}`);
 };
 

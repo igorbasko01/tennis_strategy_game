@@ -18,6 +18,8 @@ CREATE TABLE matches (
   seed INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('waiting', 'playing', 'finished')),
   winner INTEGER,
+  -- The seat that resigned, when the match ended that way.
+  resigned INTEGER,
   rating_change INTEGER,
   created_at INTEGER NOT NULL,
   started_at INTEGER,

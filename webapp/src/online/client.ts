@@ -31,6 +31,8 @@ export interface MatchView {
   exchangeCount: number;
   current: { exchange: number; youLocked: boolean; opponentLocked: boolean };
   winner: PlayerIndex | null;
+  /** The player who resigned, if the match ended that way. */
+  resigned: PlayerIndex | null;
   ratingChange: number | null;
 }
 
@@ -39,6 +41,7 @@ export interface HistoryEntry {
   finishedAt: number;
   opponent: OnlinePlayer | null;
   won: boolean;
+  resigned: 'you' | 'opponent' | null;
   sets: [number, number][];
   ratingChange: number | null;
 }
@@ -93,6 +96,8 @@ export const api = {
   register: (nickname: string) => call<Identity>('/api/players', undefined, { nickname }),
   recover: (code: string) => call<Identity>('/api/players/recover', undefined, { code }),
   me: (token: string) => call<{ player: OnlinePlayer }>('/api/me', token),
+  active: (token: string) => call<{ match: MatchView | null }>('/api/me/active', token),
+  resign: (token: string, id: string) => call<MatchView>(`/api/matches/${id}/resign`, token, {}),
   history: (token: string) => call<{ matches: HistoryEntry[] }>('/api/me/matches', token),
   create: (token: string) => call<MatchView>('/api/matches', token, {}),
   join: (token: string, code: string) => call<MatchView>('/api/matches/join', token, { code }),
