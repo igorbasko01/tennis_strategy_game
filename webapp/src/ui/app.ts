@@ -358,7 +358,7 @@ export class App {
       this.startMatch(this.practiceSetup());
     });
     $('#resume').addEventListener('click', () => this.showScreen(null));
-    $('#resume-online').addEventListener('click', () => this.resumeOnline());
+    $('#resume-online').addEventListener('click', () => void this.resumeOnline());
     $('#resign').addEventListener('click', () => void this.resignOnline());
     for (const b of document.querySelectorAll('[data-open-help]')) {
       b.addEventListener('click', () => $('#help').classList.remove('hidden'));
@@ -419,8 +419,9 @@ export class App {
       }
       online.played = online.backlog.length;
       online.backlog = [];
-      this.activeOnline = null;
     }
+    // Whatever match was on offer to resume, this one replaces it.
+    if (online) this.activeOnline = null;
     this.showScreen(null);
     this.scene.animator.speed = 1;
     void this.scene.resetPoint(this.match.server, this.match.score.serveSide, false);
@@ -683,11 +684,24 @@ export class App {
     if (!$('#menu').classList.contains('hidden')) this.showScreen('menu');
   }
 
-  private resumeOnline(): void {
-    const view = this.activeOnline;
-    if (!view || !this.identity) return;
+  /** Resumes the unfinished match, checking with the server first that it is still unfinished. */
+  private async resumeOnline(): Promise<void> {
+    const id = this.identity;
+    if (!id) return;
     this.sound.unlock();
-    this.startOnlineMatch(view, this.identity.token, true);
+    let view: MatchView | null;
+    try {
+      view = (await api.active(id.token)).match;
+    } catch (e) {
+      this.renderOnline((e as Error).message);
+      return;
+    }
+    this.activeOnline = view;
+    if (!view) {
+      this.renderOnline('That match has already ended.');
+      return;
+    }
+    this.startOnlineMatch(view, id.token, true);
   }
 
   private async resignOnline(): Promise<void> {
@@ -784,7 +798,7 @@ export class App {
       <button class="ghost" data-act="recovery">Recovery code</button>
       <button class="ghost" data-act="menu">Main menu</button>`);
     const el = $('#online');
-    el.querySelector('[data-act="resume"]')?.addEventListener('click', () => this.resumeOnline());
+    el.querySelector('[data-act="resume"]')?.addEventListener('click', () => void this.resumeOnline());
     el.querySelector('[data-act="find"]')!.addEventListener('click', () => void this.findOpponent());
     el.querySelector('[data-act="invite"]')!.addEventListener('click', () => void this.inviteOnline());
     el.querySelector('[data-act="join"]')!.addEventListener('click', () => this.renderOnlineJoin());
@@ -792,14 +806,15 @@ export class App {
     el.querySelector('[data-act="recovery"]')!.addEventListener('click', () => this.renderOnlineRecovery());
     // Refresh the rating, and look for a match to resume, in the background.
     const gen = this.onlineGen;
-    if (!this.activeOnline && !(this.match && !this.match.isOver && this.setup?.online)) {
+    // Always ask the server, so a match that ended elsewhere (resigned, finished on another device)
+    // stops being offered, and one started elsewhere appears.
+    if (!(this.match && !this.match.isOver && this.setup?.online)) {
       api
         .active(id.token)
         .then(({ match }) => {
-          if (match && gen === this.onlineGen) {
-            this.activeOnline = match;
-            this.renderOnline(error);
-          }
+          if (gen !== this.onlineGen || (match?.id ?? null) === (this.activeOnline?.id ?? null)) return;
+          this.activeOnline = match;
+          this.renderOnline(error);
         })
         .catch(() => undefined);
     }
