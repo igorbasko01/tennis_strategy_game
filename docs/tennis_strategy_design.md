@@ -58,35 +58,9 @@ This applies to the return (from the serve read), the counter-attack (from the r
 
 Shot total: skill \+ action cost \+ position \+ random factor.
 
-### Tournament skill
-
-Every player starts tournaments at skill 0.30, and skill carries over from one tournament to the next. After each tournament match the winner gains, and the loser loses, 0.08 × (1 − the winner's expected chance of winning), rounded to 0.01 and capped at 0.06. The expected chance is 1 / (1 + e^(−gap / 0.05)), where gap is the winner's skill minus the loser's. So a strong player beating a much weaker one gains almost nothing, while an upset moves up to 0.06 each way. Skill stays between 0.20 and 1.00.
-
-Sitting out a tournament costs a random 0.01–0.05 skill, but rest never takes a player below the starting 0.30.
-
-### Tiers
-
-Every tournament has two 8-player draws played at the same time. The players who enter (CPUs who rest don't) are ranked by skill, equal skills in random order: the top eight make Tier 1 and the rest Tier 2, with byes for empty slots. The cut-off moves with who rests, so a lower-ranked player can reach Tier 1 when the top players sit out. The player's draw is always full: when the player is in Tier 2, it takes the bottom eight and Tier 1 is the short one.
-
-Prize money (in dollars) is paid after every tournament match, by tier:
-
-| | Tier 2 | Tier 1 |
-| --- | --- | --- |
-| Playing the quarterfinal | $10 | $25 |
-| Winning the quarterfinal | +$10 | +$25 |
-| Winning the semifinal | +$20 | +$50 |
-| Winning the final | +$40 | +$100 |
-| Title in total | $80 | $200 |
-
-Practice matches and skipped tournaments pay nothing. The player's total is kept in the profile; CPUs don't earn money yet.
-
-After being knocked out of a tournament the player can buy one coaching review for that tournament: +0.01 skill (less than a match against an equal can give) and a summary of the match just lost: where the opponent served and hit, how many of their shots the player read right, how many misreads lost the point straight away, and the single read that would have been right most often against their serve and their shots. It costs $100 at skill 0.30, $20 more per 0.1 above that, in $10 steps.
-
-Draws use classic tennis seeding by skill (equal skills in random order), and the bracket shows each player's seed. The quarterfinals are 1 v 8 and 4 v 5 in the top half, 3 v 6 and 2 v 7 in the bottom half, so 1 and 4 can meet in a semifinal and 1 and 2 only in the final. In a short draw the weakest seeds' places are empty, so the top seeds get the byes.
-
 ### Energy
 
-Each player has energy from 100% (fresh) to 0% (exhausted). It is full at the start of a practice match. In tournaments energy carries over, both between matches and between tournaments, and each player regains 30% after every match (never above 100%). A player can skip a tournament to regain another 30%; CPUs skip below 50% energy, and 10% of the time at random. A short field is filled with byes.
+Each player has energy from 100% (fresh) to 0% (exhausted). It is full at the start of a match, except in the Online Cup, where it carries from round to round and each player regains 30% after every match (never above 100%).
 
 1. Spending: defending a shot costs energy by how far it moves the defender (Drop Shot the most, Body and Center Deep the least); a wrong read costs extra, more the worse the read; hitting costs a little.
 2. Recovery: a little after every point, more at each changeover (after every odd game of a set).

@@ -1,5 +1,4 @@
 import { duelVerdict, type FactorId } from '../engine/verdict';
-import { matchReview, type BestRead } from '../engine/review';
 import { ONLINE_SKILL, replayRng, type ResolvedExchange } from '../engine/online';
 import { api, ApiError, CUP_ROUND_NAMES, displayName, inviteLink, loadIdentity, saveIdentity, type Cup, type MatchmakingResult, type MatchView } from '../online/client';
 import {
@@ -17,56 +16,17 @@ import {
   SERVE_RECEIVE_LABEL,
   SERVE_RECEIVE_MODIFIER,
 } from '../engine/actions';
-import { AiOpponent } from '../engine/ai';
-import { FULL_ENERGY, restBySkipping } from '../engine/energy';
+import { FULL_ENERGY } from '../engine/energy';
 import { Match, type ExchangeOutcome } from '../engine/match';
 import { other, type Calculation, type Choice, type Duel, type PlayerIndex } from '../engine/resolution';
 import { MATCH_SCORING, type ScoringConfig } from '../engine/scoring';
-import {
-  emptyProfile,
-  outcomeLabel,
-  parseProfile,
-  profileStats,
-  balance,
-  rankings,
-  recordSkippedTournament,
-  saveTournamentRecord,
-  summarizeTournament,
-  type Profile,
-} from '../engine/profile';
-import { SKILL_TIERS, skillTier, type SkillTierId } from '../engine/skill';
-import { STYLES, STYLE_IDS, assignStyles, type StyleId } from '../engine/styles';
-import {
-  CPU_NAMES,
-  HUMAN,
-  MAX_SKILL,
-  champion,
-  ROUND_NAMES,
-  TOURNAMENT_START_SKILL,
-  createTournament,
-  currentOpponent,
-  currentRound,
-  decaySkill,
-  pairings,
-  prizeMoney,
-  seedOf,
-  buyCoaching,
-  canBuyCoaching,
-  coachingPrice,
-  COACHING_GAIN,
-  parseTournament,
-  playTournamentWithoutPlayer,
-  recordHumanMatch,
-  type Tournament,
-} from '../engine/tournament';
+import { STYLES, STYLE_IDS, type StyleId } from '../engine/styles';
 import type { DecisionKind } from '../scene/layout';
 import { CourtScene } from '../scene/scene';
 import { Sound } from './sound';
 
 
 interface Settings {
-  playerSkill: SkillTierId;
-  cpuSkill: SkillTierId;
   muted: boolean;
   /** Whether each shot's number breakdown starts expanded. */
   showBreakdown: boolean;
@@ -74,18 +34,14 @@ interface Settings {
 
 
 const SETTINGS_KEY = 'tennis-strategy-settings';
-const DEFAULT_SETTINGS: Settings = { playerSkill: 'pro', cpuSkill: 'pro', muted: false, showBreakdown: false };
+const DEFAULT_SETTINGS: Settings = { muted: false, showBreakdown: false };
 
 const loadSettings = (): Settings => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const saved = JSON.parse(raw) as Partial<Settings>;
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...saved };
-      // Older saves may hold values from settings that no longer exist.
-      if (!skillTier(merged.playerSkill)) merged.playerSkill = DEFAULT_SETTINGS.playerSkill;
-      if (!skillTier(merged.cpuSkill)) merged.cpuSkill = DEFAULT_SETTINGS.cpuSkill;
-      return merged;
+      return { muted: saved.muted === true, showBreakdown: saved.showBreakdown === true };
     }
   } catch {
     // Storage can be unavailable (private mode); defaults are fine.
@@ -101,82 +57,14 @@ const saveSettings = (s: Settings) => {
   }
 };
 
-const TOURNAMENT_KEY = 'tennis-strategy-tournament';
-const PLAYER_SKILL_KEY = 'tennis-strategy-player-skill';
-
-/** The skill the player has built up across tournaments. */
-const loadPlayerSkill = (): number => {
-  try {
-    const n = Number(localStorage.getItem(PLAYER_SKILL_KEY));
-    return n >= TOURNAMENT_START_SKILL && n <= MAX_SKILL ? n : TOURNAMENT_START_SKILL;
-  } catch {
-    return TOURNAMENT_START_SKILL;
-  }
-};
-
-/** Whole dollars, e.g. $1,250. */
-const dollars = (n: number) => `$${n.toLocaleString('en-US')}`;
-
-const savePlayerSkill = (skill: number) => {
-  try {
-    localStorage.setItem(PLAYER_SKILL_KEY, String(skill));
-  } catch {
-    // ignore
-  }
-};
-
-const loadTournament = (): Tournament | null => {
-  try {
-    const raw = localStorage.getItem(TOURNAMENT_KEY);
-    return raw ? parseTournament(JSON.parse(raw)) : null;
-  } catch {
-    return null;
-  }
-};
-
-const saveTournament = (t: Tournament | null) => {
-  try {
-    if (t) localStorage.setItem(TOURNAMENT_KEY, JSON.stringify(t));
-    else localStorage.removeItem(TOURNAMENT_KEY);
-  } catch {
-    // ignore
-  }
-};
-
-const PROFILE_KEY = 'tennis-strategy-profile';
-
-const loadProfile = (): Profile => {
-  try {
-    const raw = localStorage.getItem(PROFILE_KEY);
-    const profile = (raw && parseProfile(JSON.parse(raw))) || emptyProfile();
-    // Profiles saved before CPU styles existed get theirs dealt once.
-    if (!profile.styles) {
-      profile.styles = assignStyles(CPU_NAMES, Math.random);
-      saveProfile(profile);
-    }
-    return profile;
-  } catch {
-    return emptyProfile();
-  }
-};
-
-const saveProfile = (p: Profile) => {
-  try {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
-  } catch {
-    // ignore
-  }
-};
-
 /** Everything needed to start (or restart) a match. */
 interface MatchSetup {
   names: [string, string];
   skills: [number, number];
   scoring: ScoringConfig;
-  tournament: boolean;
   /** How the CPU opponent plays. */
   cpuStyle: StyleId;
-  /** Energy going in: [player, CPU]. Tournament matches carry it from the previous round. */
+  /** Energy going in: [you, opponent]. Full, except in an Online Cup where it carries between rounds. */
   energy: [number, number];
   /** Set for a match against a real person over the network. */
   online?: OnlineSession;
@@ -257,13 +145,8 @@ export class App {
   private readonly scene: CourtScene;
   private readonly sound = new Sound();
   private match: Match | null = null;
-  private ai = new AiOpponent();
   private names: [string, string] = ['You', 'CPU'];
-  /** Every duel of the current match, for the coaching review. */
-  private matchLog: Duel[] = [];
   private setup: MatchSetup | null = null;
-  private tournament = loadTournament();
-  private profile = loadProfile();
   /** Bumped whenever a match is abandoned so stale async flows stop. */
   private generation = 0;
   private markerTap: ((id: string) => void) | null = null;
@@ -314,50 +197,9 @@ export class App {
 
   private bindMenu(): void {
     const menu = $('#menu');
-    const practice = $('#practice');
-    menu.querySelector('[data-act="practice"]')!.addEventListener('click', () => this.showScreen('practice'));
     menu.querySelector('[data-act="online"]')!.addEventListener('click', () => {
       this.sound.unlock();
       this.renderOnline();
-    });
-    menu.querySelector('[data-act="settings"]')!.addEventListener('click', () => this.renderSettings());
-    menu.querySelector('[data-act="profile"]')!.addEventListener('click', () => this.renderProfile());
-    menu.querySelector('[data-act="rankings"]')!.addEventListener('click', () => this.renderRankings());
-    menu.querySelector('[data-act="tournament"]')!.addEventListener('click', () => {
-      this.sound.unlock();
-      if (this.tournament?.status === 'playing') this.renderTournament();
-      else this.renderEntry();
-    });
-    practice.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
-
-    for (const seg of practice.querySelectorAll<HTMLElement>('[data-skill-options]')) {
-      seg.innerHTML = SKILL_TIERS.map(
-        (t) => `<button data-value="${t.id}"><span>${t.label}</span><small>${t.skill.toFixed(1)}</small></button>`,
-      ).join('');
-    }
-    const sync = () => {
-      for (const seg of practice.querySelectorAll<HTMLElement>('.segmented')) {
-        const key = seg.dataset.setting as keyof Settings;
-        for (const b of seg.querySelectorAll<HTMLButtonElement>('button')) {
-          const on = String(this.settings[key]) === b.dataset.value;
-          b.classList.toggle('on', on);
-          b.setAttribute('aria-pressed', String(on));
-        }
-      }
-    };
-    practice.addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.segmented button');
-      if (!b) return;
-      const key = (b.parentElement as HTMLElement).dataset.setting as 'playerSkill' | 'cpuSkill';
-      (this.settings as unknown as Record<string, string>)[key] = b.dataset.value!;
-      saveSettings(this.settings);
-      sync();
-    });
-    sync();
-
-    $('#start').addEventListener('click', () => {
-      this.sound.unlock();
-      this.startMatch(this.practiceSetup());
     });
     $('#resume').addEventListener('click', () => this.showScreen(null));
     $('#resume-online').addEventListener('click', () => void this.resumeOnline());
@@ -372,8 +214,8 @@ export class App {
   }
 
   /** Shows one full-screen overlay (or none, to reveal the match). */
-  private showScreen(screen: 'menu' | 'practice' | 'tournament' | 'profile' | 'rankings' | 'settings' | 'over' | 'online' | null): void {
-    for (const id of ['menu', 'practice', 'tournament', 'profile', 'rankings', 'settings', 'over', 'online']) $(`#${id}`).classList.toggle('hidden', id !== screen);
+  private showScreen(screen: 'menu' | 'over' | 'online' | null): void {
+    for (const id of ['menu', 'over', 'online']) $(`#${id}`).classList.toggle('hidden', id !== screen);
     const playing = !!(this.match && !this.match.isOver);
     $('#resume').classList.toggle('hidden', !playing);
     $('#resign').classList.toggle('hidden', !(playing && this.setup?.online));
@@ -382,26 +224,13 @@ export class App {
     if (resumable) $('#resume-online').textContent = `Resume online match vs ${this.activeOnline!.opponent?.nickname ?? 'opponent'}`;
   }
 
-  private practiceSetup(): MatchSetup {
-    return {
-      names: ['You', 'CPU'],
-      skills: [skillTier(this.settings.playerSkill)!.skill, skillTier(this.settings.cpuSkill)!.skill],
-      scoring: MATCH_SCORING,
-      tournament: false,
-      cpuStyle: 'balanced',
-      energy: [FULL_ENERGY, FULL_ENERGY],
-    };
-  }
-
   // ---------------------------------------------------------------- match flow
 
   private startMatch(setup: MatchSetup): void {
     this.generation++;
     this.setup = setup;
     this.names = setup.names;
-    this.matchLog = [];
     const firstServer: PlayerIndex = setup.online ? setup.online.firstServer : Math.random() < 0.5 ? 0 : 1;
-    this.ai = new AiOpponent(Math.random, STYLES[setup.cpuStyle]);
     this.match = new Match(
       [
         { name: setup.names[0], skill: setup.skills[0] },
@@ -417,7 +246,7 @@ export class App {
       for (const x of online.backlog) {
         this.match.submit(0, x.choices[0]);
         this.match.submit(1, x.choices[1]);
-        this.matchLog.push(...this.match.resolve(replayRng(x.rolls)).exchange.duels);
+        this.match.resolve(replayRng(x.rolls));
       }
       online.played = online.backlog.length;
       online.backlog = [];
@@ -441,26 +270,19 @@ export class App {
       if (this.setup?.online) this.setup.online.locked = false;
       const choice = lockedBefore ? null : await this.choose(0);
       if (!alive()) return;
-      let rng: () => number = Math.random;
-      if (this.setup?.online) {
-        // The server resolves the exchange; it may have chosen for us if our time ran out.
-        const resolved = await this.onlineExchange(gen, this.setup.online, choice);
-        if (!alive()) return;
-        if (!resolved) {
-          this.renderOnlineEnded(this.setup.online.view);
-          return;
-        }
-        match.submit(0, resolved.choices[0]);
-        match.submit(1, resolved.choices[1]);
-        rng = replayRng(resolved.rolls);
-      } else {
-        match.submit(0, choice!);
-        match.submit(1, this.ai.choose(match, 1));
+      // The server resolves the exchange with its own dice; we replay it exactly.
+      const online = this.setup!.online!;
+      const resolved = await this.onlineExchange(gen, online, choice);
+      if (!alive()) return;
+      if (!resolved) {
+        this.renderOnlineEnded(online.view);
+        return;
       }
+      match.submit(0, resolved.choices[0]);
+      match.submit(1, resolved.choices[1]);
 
       const choices = [...match.lockedChoices] as [Choice, Choice];
-      const outcome = match.resolve(rng);
-      this.matchLog.push(...outcome.exchange.duels);
+      const outcome = match.resolve(replayRng(resolved.rolls));
 
       this.renderRevealing(choices);
       await this.scene.playExchange(outcome.exchange);
@@ -725,7 +547,6 @@ export class App {
       names: ['You', view.opponent?.nickname ?? 'Opponent'],
       skills: [ONLINE_SKILL, ONLINE_SKILL],
       scoring: MATCH_SCORING,
-      tournament: false,
       cpuStyle: view.opponent?.bot?.style ?? 'balanced',
       energy: view.energy ?? [FULL_ENERGY, FULL_ENERGY],
       online: {
@@ -1352,24 +1173,7 @@ export class App {
       ['Correct reads', (p) => `${st[p].readsCorrect}/${st[p].readsMade} (${pct(st[p].readsCorrect, st[p].readsMade)})`],
     ];
     const title = w === 0 ? 'You win!' : `${this.names[1]} wins`;
-    const inTournament = this.setup?.tournament === true && this.tournament?.status === 'playing';
     let subtitle = '';
-    if (inTournament) {
-      // Record the result straight away so a reload can't lose it.
-      const t = this.tournament!;
-      const roundName = ROUND_NAMES[currentRound(t)];
-      const before = t.entrants[HUMAN].skill;
-      const prizeBefore = prizeMoney(t);
-      const next = recordHumanMatch(t, w === 0, m.score.completedSets, Math.random, m.energy);
-      this.storeTournament(next);
-      // Skill won in the tournament stays with the player for the next one.
-      savePlayerSkill(next.entrants[HUMAN].skill);
-      const change = next.entrants[HUMAN].skill - before;
-      const skillNote = `skill ${change < 0 ? '−' : '+'}${Math.abs(change).toFixed(2)}`;
-      const prize = prizeMoney(next) - prizeBefore;
-      const prizeNote = prize > 0 ? ` · +${dollars(prize)}` : '';
-      subtitle = (w === 0 ? `${roundName} won · ${skillNote}` : `Knocked out in the ${roundName.toLowerCase()} · ${skillNote}`) + prizeNote;
-    }
     const online = this.setup?.online;
     if (online) {
       const change = online.view.ratingChange;
@@ -1399,322 +1203,18 @@ export class App {
             <tr><td>Longest rally</td><td colspan="2">${st[0].longestRally} shots</td></tr>
           </tbody>
         </table>
-        ${inTournament && this.tournament && canBuyCoaching(this.tournament) ? this.coachingOffer() : ''}
         ${
-          inTournament
-            ? '<button class="primary big" data-act="bracket">Continue</button>'
-            : online
-              ? online.view.cup
-                ? '<button class="primary big" data-act="cup-home">Back to the Cup</button>'
-                : '<button class="primary big" data-act="online-home">Back to online</button>'
-              : '<button class="primary big" data-act="again">Play again</button>'
+          online?.view.cup
+            ? '<button class="primary big" data-act="cup-home">Back to the Cup</button>'
+            : '<button class="primary big" data-act="online-home">Back to online</button>'
         }
         <button class="ghost" data-act="menu">Main menu</button>
       </div>`;
     this.showScreen('over');
-    el.querySelector('[data-act="again"]')?.addEventListener('click', () => this.startMatch(this.setup!));
-    el.querySelector('[data-act="bracket"]')?.addEventListener('click', () => this.renderTournament());
     el.querySelector('[data-act="online-home"]')?.addEventListener('click', () => this.renderOnline());
     el.querySelector('[data-act="cup-home"]')?.addEventListener('click', () => void this.openCup(online!.view.cup!.id));
-    el.querySelector('[data-act="coach"]')?.addEventListener('click', () => {
-      this.storeTournament(buyCoaching(this.tournament!));
-      savePlayerSkill(this.tournament!.entrants[HUMAN].skill);
-      el.querySelector('.coaching')!.outerHTML = this.coachingReview();
-    });
     el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
     $('#panel').innerHTML = '';
-  }
-
-  /** After a tournament loss: a coaching review for sale, if the player can afford it. */
-  private coachingOffer(): string {
-    const price = coachingPrice(loadPlayerSkill());
-    const money = balance(this.profile);
-    const short = money < price;
-    return `
-      <div class="coaching">
-        <p>A coach can go over this match with you: what ${escapeHtml(this.names[1])} kept doing and how you read it. <b>+${COACHING_GAIN.toFixed(2)} skill</b>.</p>
-        <button class="ghost" data-act="coach" ${short ? 'disabled' : ''}>Coaching review · ${dollars(price)}</button>
-        <p class="small">You have ${dollars(money)}${short ? ` · ${dollars(price - money)} short` : ''}</p>
-      </div>`;
-  }
-
-  /** What the coach found in the match just lost. */
-  private coachingReview(): string {
-    const r = matchReview(this.matchLog, 0);
-    const opp = escapeHtml(this.names[1]);
-    const list = <K extends string>(counts: Record<K, number>, label: Record<K, string>) =>
-      (Object.keys(counts) as K[])
-        .filter((k) => counts[k] > 0)
-        .sort((a, b) => counts[b] - counts[a])
-        .map((k) => `${label[k]} ${counts[k]}`)
-        .join(' · ') || 'none';
-    const misreads = r.reads - r.readsRight;
-    const bestLine = <K extends string>(title: string, b: BestRead<K>, label: Record<K, string>) =>
-      b.reads.length ? `<p><b>${title}:</b> ${b.reads.map((k) => label[k]).join(' or ')} (right ${b.right} of ${b.of}${b.reads.length > 1 ? ' each' : ''})</p>` : '';
-    return `
-      <div class="coaching review">
-        <h3>Coach’s review · skill +${COACHING_GAIN.toFixed(2)}</h3>
-        <p><b>${opp} served:</b> ${list(r.serves, SERVE_LABEL)}</p>
-        <p><b>${opp} hit:</b> ${list(r.shots, ATTACK_LABEL)}</p>
-        <p><b>Your reads:</b> ${r.readsRight} of ${r.reads} right${misreads > 0 ? ` · <b>${r.misreadsLost} of your ${misreads} misreads lost the point straight away</b>` : ''}</p>
-        ${bestLine(`Best read on ${opp}’s serve`, r.bestServeRead, SERVE_RECEIVE_LABEL)}
-        ${bestLine(`Best cover against ${opp}’s shots`, r.bestCover, ATTACK_LABEL)}
-        <p class="small">Players keep their habits. Next time you meet ${opp}, read for what they did most.</p>
-      </div>`;
-  }
-
-  // ---------------------------------------------------------------- tournament
-
-  private renderSettings(): void {
-    const el = $('#settings');
-    const fresh = loadPlayerSkill() <= TOURNAMENT_START_SKILL && this.profile.tournaments.length === 0 && !this.tournament;
-    el.innerHTML = `
-      <div class="menu-card">
-        <h2>Settings</h2>
-        <p class="tagline">Start over with skill ${TOURNAMENT_START_SKILL.toFixed(2)}, no tournament history and tournament numbering from #1.</p>
-        <button class="primary big" data-act="reset" ${fresh ? 'disabled' : ''}>Start fresh</button>
-        <button class="ghost" data-act="back">Back</button>
-      </div>`;
-    this.showScreen('settings');
-    el.querySelector('[data-act="reset"]')!.addEventListener('click', () => {
-      if (!window.confirm('Start fresh? Your skill, tournament in progress and tournament history will all be deleted.')) return;
-      savePlayerSkill(TOURNAMENT_START_SKILL);
-      this.profile = emptyProfile();
-      saveProfile(this.profile);
-      this.tournament = null;
-      saveTournament(null);
-      if (this.setup?.tournament) {
-        this.generation++;
-        this.match = null;
-      }
-      this.renderSettings();
-    });
-    el.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
-  }
-
-  /** Before each tournament: enter it, or sit it out to rest. */
-  private renderEntry(note = ''): void {
-    const number = this.profile.nextTournament;
-    const energy = this.profile.energy?.You ?? FULL_ENERGY;
-    const rested = restBySkipping(energy);
-    const el = $('#tournament');
-    el.innerHTML = `
-      <div class="menu-card">
-        <h2>Tournament #${number}</h2>
-        ${note ? `<p class="tagline">${escapeHtml(note)}</p>` : ''}
-        <div class="next-match">
-          <div><span class="setting-label">Your energy</span><b>${Math.round(energy * 100)}%</b></div>
-          <div><span class="setting-label">Your skill</span><b>${loadPlayerSkill().toFixed(2)}</b></div>
-          <div><span class="setting-label">Money</span><b>${dollars(balance(this.profile))}</b></div>
-        </div>
-        <button class="primary big" data-act="enter">Enter tournament</button>
-        <button class="ghost" data-act="skip" ${rested <= energy ? 'disabled' : ''}>Skip &amp; rest (energy → ${Math.round(rested * 100)}%)</button>
-        <button class="ghost" data-act="menu">Main menu</button>
-      </div>`;
-    this.showScreen('tournament');
-    el.querySelector('[data-act="enter"]')!.addEventListener('click', () => {
-      this.newTournament();
-      this.renderTournament();
-    });
-    el.querySelector('[data-act="skip"]')!.addEventListener('click', () => {
-      const cpus = playTournamentWithoutPlayer(Math.random, this.profile.roster, this.profile.styles, this.profile.energy);
-      const startSkill = loadPlayerSkill();
-      const endSkill = decaySkill(startSkill, Math.random);
-      savePlayerSkill(endSkill);
-      this.profile = recordSkippedTournament(this.profile, cpus, startSkill, endSkill);
-      saveProfile(this.profile);
-      this.tournament = null;
-      saveTournament(null);
-      const lost = startSkill - endSkill;
-      this.renderEntry(`You sat out Tournament #${number} and rested${lost > 0 ? ` · skill −${lost.toFixed(2)}` : ''}.`);
-    });
-    el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
-  }
-
-  private newTournament(): void {
-    this.storeTournament(
-      createTournament(
-        Math.random,
-        loadPlayerSkill(),
-        this.profile.nextTournament,
-        this.profile.roster,
-        this.profile.styles,
-        this.profile.energy,
-      ),
-    );
-  }
-
-  /** Saves the tournament and its entry in the player's history. */
-  private storeTournament(t: Tournament): void {
-    this.tournament = t;
-    saveTournament(t);
-    this.profile = saveTournamentRecord(this.profile, t);
-    saveProfile(this.profile);
-  }
-
-  // ---------------------------------------------------------------- profile
-
-  private renderRankings(): void {
-    const rows = rankings(this.profile, loadPlayerSkill())
-      .map(
-        (r) => `
-        <li class="${r.isPlayer ? 'me' : ''}">
-          <span class="rank">${r.rank}</span>
-          <span class="nm">${escapeHtml(r.name)}${r.style ? ` <small class="style">${STYLES[r.style].icon} ${STYLES[r.style].label}</small>` : ''}</span>
-          <span class="en">${Math.round(r.energy * 100)}%</span>
-          <b class="sk">${r.skill.toFixed(2)}</b>
-        </li>`,
-      )
-      .join('');
-    const el = $('#rankings');
-    el.innerHTML = `
-      <div class="menu-card">
-        <h2>Rankings</h2>
-        <p class="tagline">All players by skill</p>
-        <ol class="ranking">${rows}</ol>
-        <button class="ghost" data-act="back">Back</button>
-      </div>`;
-    this.showScreen('rankings');
-    el.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
-  }
-
-  private renderProfile(): void {
-    const stats = profileStats(this.profile);
-    const tile = (label: string, value: string) => `<div class="stat-tile"><span class="setting-label">${label}</span><b>${value}</b></div>`;
-    const history = [...this.profile.tournaments]
-      .reverse()
-      .map((r) => {
-        const tone = r.status === 'won' ? 'won' : r.status === 'playing' ? 'live' : 'out';
-        const matches = r.matches
-          .map(
-            (m) => `
-          <li>
-            <span class="round-name">${m.round}</span>
-            <span class="opp">${escapeHtml(m.opponent)} <small>${m.opponentSkill.toFixed(2)}</small></span>
-            <span class="result ${m.won ? 'w' : 'l'}">${m.won ? 'W' : 'L'} ${m.score}</span>
-          </li>`,
-          )
-          .join('');
-        return `
-        <section class="history-card">
-          <div class="history-head">
-            <h3>Tournament #${r.number}${r.tier ? ` · Tier ${r.tier}` : ''}</h3>
-            <span class="outcome ${tone}">${r.status === 'won' ? '🏆 ' : ''}${outcomeLabel(r)}</span>
-          </div>
-          ${
-            r.status === 'skipped'
-              ? ''
-              : `<p class="skill-change">Skill ${r.startSkill.toFixed(2)} → ${r.endSkill.toFixed(2)}${r.prize ? ` · ${dollars(r.prize)} won` : ''}${r.coaching ? ` · ${dollars(r.coaching)} coaching` : ''}</p>
-          ${matches ? `<ul>${matches}</ul>` : '<p class="tbd">No matches played yet</p>'}`
-          }
-        </section>`;
-      })
-      .join('');
-    const el = $('#profile');
-    el.innerHTML = `
-      <div class="menu-card">
-        <h2>Profile</h2>
-        <div class="stat-tiles">
-          ${tile('Skill', loadPlayerSkill().toFixed(2))}
-          ${tile('Money', dollars(stats.prizeMoney))}
-          ${tile('Tournaments', String(stats.tournaments))}
-          ${tile('Titles', String(stats.titles))}
-          ${tile('Matches', `${stats.matchesWon}–${stats.matchesLost}`)}
-        </div>
-        <button class="ghost" data-act="back">Back</button>
-        <div class="history">${history || '<p class="tbd">No tournaments yet. Your results will appear here.</p>'}</div>
-      </div>`;
-    this.showScreen('profile');
-    el.querySelector('[data-act="back"]')!.addEventListener('click', () => this.showScreen('menu'));
-  }
-
-  private tournamentSetup(): MatchSetup {
-    const t = this.tournament!;
-    const opp = t.entrants[currentOpponent(t)!];
-    return {
-      names: ['You', opp.name],
-      skills: [t.entrants[HUMAN].skill, opp.skill],
-      scoring: MATCH_SCORING,
-      tournament: true,
-      cpuStyle: opp.style ?? 'balanced',
-      energy: [t.entrants[HUMAN].energy ?? FULL_ENERGY, t.entrants[currentOpponent(t)!].energy ?? FULL_ENERGY],
-    };
-  }
-
-  private renderTournament(): void {
-    const t = this.tournament!;
-    const round = currentRound(t);
-    const name = (i: number) => escapeHtml(t.entrants[i].name);
-    const skill = (i: number) => t.entrants[i].skill.toFixed(2);
-    const styleOf = (i: number) => {
-      const id = t.entrants[i].style;
-      return id ? STYLES[id] : null;
-    };
-    const styleIcon = (i: number) => {
-      const s = styleOf(i);
-      return s ? ` <span class="style-icon" title="${s.label}" aria-label="${s.label}">${s.icon}</span>` : '';
-    };
-    const energyTag = (i: number) => `<small class="energy-tag">${Math.round((t.entrants[i].energy ?? FULL_ENERGY) * 100)}% energy</small>`;
-    const styleTag = (i: number) => {
-      const s = styleOf(i);
-      return s ? `<small class="style">${s.icon} ${s.label}</small>` : '';
-    };
-
-    let head: string;
-    let actions: string;
-    if (t.status === 'playing') {
-      const opp = currentOpponent(t)!;
-      head = `
-        <p class="tagline">${ROUND_NAMES[round]}</p>
-        <div class="next-match">
-          <div><span class="player-chip p0">You</span><b>${skill(HUMAN)}</b>${energyTag(HUMAN)}</div>
-          <span class="vs">vs</span>
-          <div><span class="player-chip p1">${name(opp)}</span><b>${skill(opp)}</b>${energyTag(opp)}${styleTag(opp)}</div>
-        </div>`;
-      actions = `
-        <button class="primary big" data-act="play">Play ${ROUND_NAMES[round].toLowerCase()}</button>
-        <button class="ghost" data-act="menu">Main menu</button>`;
-    } else {
-      const winner = champion(t);
-      head =
-        t.status === 'won'
-          ? `<div class="trophy" aria-hidden="true">🏆</div><p class="tagline">Champion! Final skill ${skill(HUMAN)}</p>`
-          : `<p class="tagline">${outcomeLabel(summarizeTournament(t))}${winner === null ? '' : ` · ${name(winner)} won`}</p>`;
-      actions = `
-        <button class="primary big" data-act="new">Next tournament</button>
-        <button class="ghost" data-act="menu">Main menu</button>`;
-    }
-
-    const rounds = ROUND_NAMES.map((roundName, r) => {
-      if (r >= t.draws.length) return `<section class="round"><h3>${roundName}</h3><p class="tbd">To be decided</p></section>`;
-      const results = t.results[r];
-      const rows = pairings(t, r)
-        .map((pair, i) => {
-          const res = results?.[i];
-          // Played matches show the skill each player had at the time; upcoming ones their current skill.
-          const cell = (p: number, side: 0 | 1) =>
-            `<span class="${res ? (res.winner === p ? 'won' : 'lost') : ''} ${p === HUMAN ? 'me' : ''}"><small class="seed">${seedOf(t, p)}</small><span class="nm">${name(p)}</span>${styleIcon(p)} <small class="sk">${(res ? res.skills[side] : t.entrants[p].skill).toFixed(2)}</small></span>`;
-          return `<li>${cell(pair[0], 0)}<span class="vs">vs</span>${cell(pair[1], 1)}<span class="score">${res ? res.score : ''}</span></li>`;
-        })
-        .join('');
-      return `<section class="round"><h3>${roundName}</h3><ul>${rows}</ul></section>`;
-    }).join('');
-
-    const el = $('#tournament');
-    el.innerHTML = `
-      <div class="menu-card">
-        <h2>Tournament #${t.number} · Tier ${t.tier}</h2>
-        ${head}
-        ${actions}
-        <div class="bracket">${rounds}</div>
-      </div>`;
-    this.showScreen('tournament');
-    el.querySelector('[data-act="play"]')?.addEventListener('click', () => {
-      this.sound.unlock();
-      this.startMatch(this.tournamentSetup());
-    });
-    el.querySelector('[data-act="new"]')?.addEventListener('click', () => this.renderEntry());
-    el.querySelector('[data-act="menu"]')!.addEventListener('click', () => this.showScreen('menu'));
   }
 
   // ---------------------------------------------------------------- help
@@ -1751,12 +1251,10 @@ export class App {
       a correct read puts you <b>in position</b> (+0.1, or +0.2 after reading a drop shot), and a lucky cover after
       a wrong read leaves you <b>stretched</b> (down to −0.2). Serves always start from a neutral position.</p>
       <h3>Energy</h3>
-      <p>Energy is the bar by each name. Practice matches start at full energy. Tournament energy carries over: from
-      one round to the next and from one tournament to the next, with a 30% rest each time. Before a tournament you can
-      skip it to rest for another 30%, but your rivals keep improving while you are out. CPUs skip when they are below
-      50% energy, and sometimes at random. Running costs energy: defending,
-      especially drop shots, and most of all changing direction after a wrong read. You win a little back after
-      every point and more at changeovers.</p>
+      <p>Energy is the bar by each name. Matches start at full energy, except in the Online Cup, where it carries
+      from round to round with a 30% rest after each match. Running costs energy: defending, especially drop shots,
+      and most of all changing direction after a wrong read. You win a little back after every point and more at
+      changeovers.</p>
       <p>While you are fresh you can scramble back from a wrong read and recover up to half its penalty, so early
       rallies last longer. As you tire that recovery fades, and every shot and read loses up to −0.15.</p>
       <p>Under each shot a line sums it up from your side: a call such as “Good read, unlucky” and your chance of
@@ -1767,9 +1265,9 @@ export class App {
       <p>In the shot breakdown the purple <b>energy</b> term combines both: a plus means a scramble saved part of a
       wrong read (the read is marked “scrambled”), a minus means fatigue. The energy a misread costs shows in the
       bar by your name.</p>
-      <h3>CPU styles</h3>
-      <p>Every CPU player has a style it always plays with. It doesn't learn from you, but it leans on its favourite
-      choices, so watch what your opponent does and adapt. Styles are dealt out again when you start fresh.</p>
+      <h3>Bot styles</h3>
+      <p>Every bot has a style it always plays with. It doesn't learn from you, but it leans on its favourite
+      choices, so watch what it does and adapt.</p>
       <ul>${STYLE_IDS.map((id) => `<li>${STYLES[id].icon} <b>${STYLES[id].label}</b>: ${STYLES[id].description}</li>`).join('')}</ul>
       <h3>Playing online</h3>
       <p>Find an opponent pairs you with another player who is looking, closest rating first. If nobody turns up
@@ -1782,7 +1280,7 @@ export class App {
       <p>Play online can also invite a friend by link or code. Both of you play at skill 0.50, so only your decisions and the
       dice count. Choices are revealed together once both of you have locked in, and there's no time limit. If you
       reload or come back later, Resume online match picks up where you left off; Resign (in the menu) ends it as a loss. Your
-      online rating starts at 1000 and moves like chess Elo; it's separate from your career skill.</p>
+      online rating starts at 1000 and moves like chess Elo.</p>
       <h3>Serve vs. read</h3>
       <p class="small">Rows: serve (risk). Columns: receiver's read.</p>
       ${serveTable}
@@ -1793,12 +1291,6 @@ export class App {
       <ul>
         <li>Safe shots (Body, Center Deep) cost less but are easier to read.</li>
         <li>A correctly read drop shot gets a big +0.6 bonus — don't get predictable with it.</li>
-        <li>Skill is added to every shot and read. In a practice match you pick yours and the CPU's (0.3 Beginner to 0.7 Legend).</li>
-        <li>In a tournament everyone starts at 0.30 and skill carries over from one tournament to the next. Beating a stronger player gains a lot (up to 0.06); beating a much weaker one gains almost nothing. The loser drops by the same amount.</li>
-        <li>Each tournament has two draws played at the same time. Tier 1 is the strongest eight players who enter, Tier 2 the rest, so who rests moves the cut-off. The draw is seeded by skill, like real tennis: the small number by each name is the seed. Top seeds open against the lowest (1 v 8, 2 v 7, …), and the two strongest can only meet in the final.</li>
-        <li>Tournaments pay prize money after every match: Tier 2 pays $10 for playing the quarterfinal, then $10, $20 and $40 for winning each round ($80 for a title); Tier 1 pays $25, $25, $50 and $100 ($200).</li>
-        <li>After a tournament loss you can buy one coaching review: +0.01 skill and a look at what your opponent kept doing. It costs $100 at skill 0.30 and $20 more for every 0.1 above that.</li>
-        <li>Skipping a tournament costs 0.01–0.05 skill, but never takes you below 0.30.</li>
         <li>You can tap the glowing zones on the court instead of the buttons.</li>
       </ul>`;
   }
