@@ -8,6 +8,7 @@ import {
 import type { Choice, PlayerIndex } from '../../webapp/src/engine/resolution';
 import { AiOpponent } from '../../webapp/src/engine/ai';
 import { STYLES, type StyleId } from '../../webapp/src/engine/styles';
+import { restBetweenMatches } from '../../webapp/src/engine/energy';
 
 export interface Env {
   DB: D1Database;
@@ -19,6 +20,10 @@ const INVITE_TTL_MS = 60 * 60 * 1000;
 const MATCHMAKING_SECONDS = 15;
 /** A queued player who stops checking in for this long is skipped (they left). */
 const QUEUE_STALE_MS = 6000;
+/** Round names for the Online Cup. */
+const CUP_ROUNDS = ['Quarterfinal', 'Semifinal', 'Final'];
+/** A cup bot comes into each round about as rested as a typical player would be. */
+const CUP_BOT_ENERGY = [1, 0.85, 0.75];
 const BOT_NAMES = ['Ace', 'Volley', 'Slice', 'Topspin', 'Rally', 'Smash', 'Lob', 'Baseline'];
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -43,6 +48,12 @@ interface MatchRow {
   bot_style: StyleId | null;
   bot_name: string | null;
   rated: number;
+  energy0: number;
+  energy1: number;
+  cup0: string | null;
+  cup1: string | null;
+  cup_round: number | null;
+  started_at: number | null;
   created_at: number;
   finished_at: number | null;
 }
@@ -161,6 +172,9 @@ const loadMoves = async (env: Env, matchId: string) => {
   return results;
 };
 
+/** Each seat's energy going into the match. */
+const energiesOf = (m: MatchRow): [number, number] => [m.energy0 ?? 1, m.energy1 ?? 1];
+
 /** Moves grouped by exchange, one choice per seat. */
 const pairsOf = (rows: MoveRow[]) => {
   const pairs: [Choice | null, Choice | null][] = [];
@@ -180,11 +194,12 @@ const insertMove = (env: Env, matchId: string, exchange: number, seat: number, c
 const finish = async (env: Env, m: MatchRow, winner: PlayerIndex, resigned: PlayerIndex | null = null) => {
   if (!m.rated) {
     // Bot matches are unrated.
-    await env.DB.prepare(
+    const done = await env.DB.prepare(
       "UPDATE matches SET status = 'finished', winner = ?, resigned = ?, finished_at = ? WHERE id = ? AND status = 'playing'",
     )
       .bind(winner, resigned, Date.now(), m.id)
       .run();
+    if (done.meta.changes === 1) await advanceCups(env, m, winner);
     return;
   }
   const players = await env.DB.prepare('SELECT id, rating FROM players WHERE id IN (?, ?)').bind(m.seat0, m.seat1).all<{ id: string; rating: number }>();
@@ -202,6 +217,38 @@ const finish = async (env: Env, m: MatchRow, winner: PlayerIndex, resigned: Play
       env.DB.prepare('UPDATE players SET rating = rating + ? WHERE id = ?').bind(change, w),
       env.DB.prepare('UPDATE players SET rating = rating - ? WHERE id = ?').bind(change, l),
     ]);
+    await advanceCups(env, m, winner);
+  }
+};
+
+/**
+ * After a cup match: the winner's run moves on to the next round with the energy
+ * they finished on plus the usual rest (or wins the cup after the final); the
+ * loser's run ends in that round.
+ */
+const advanceCups = async (env: Env, m: MatchRow, winner: PlayerIndex) => {
+  if (!m.cup0 && !m.cup1) return;
+  const { match } = replay(m.seed, pairsOf(await loadMoves(env, m.id)), energiesOf(m));
+  const now = Date.now();
+  for (const seat of [0, 1] as PlayerIndex[]) {
+    const cup = seat === 0 ? m.cup0 : m.cup1;
+    if (!cup) continue;
+    const player = seat === 0 ? m.seat0 : m.seat1!;
+    const rating = (await env.DB.prepare('SELECT rating FROM players WHERE id = ?').bind(player).first<{ rating: number }>())?.rating ?? 1000;
+    const round = m.cup_round ?? 0;
+    if (seat !== winner) {
+      await env.DB.prepare("UPDATE cup_runs SET status = 'lost', round = ?, rating_end = ?, finished_at = ? WHERE id = ? AND status = 'playing'")
+        .bind(round, rating, now, cup)
+        .run();
+    } else if (round >= CUP_ROUNDS.length - 1) {
+      await env.DB.prepare("UPDATE cup_runs SET status = 'won', round = ?, rating_end = ?, finished_at = ? WHERE id = ? AND status = 'playing'")
+        .bind(round, rating, now, cup)
+        .run();
+    } else {
+      await env.DB.prepare("UPDATE cup_runs SET round = ?, energy = ? WHERE id = ? AND status = 'playing'")
+        .bind(round + 1, restBetweenMatches(match.energy[seat]), cup)
+        .run();
+    }
   }
 };
 
@@ -214,7 +261,7 @@ const advance = async (env: Env, id: string): Promise<MatchRow> => {
   const m = await loadMatch(env, id);
   if (m.status !== 'playing') return m;
   const pairs = pairsOf(await loadMoves(env, id));
-  const { match, resolved } = replay(m.seed, pairs);
+  const { match, resolved } = replay(m.seed, pairs, energiesOf(m));
   if (match.isOver) {
     await finish(env, m, match.score.winner!);
     return loadMatch(env, id);
@@ -239,7 +286,7 @@ const view = async (env: Env, m: MatchRow, seat: PlayerIndex, since = 0) => {
   const rows = m.status === 'waiting' ? [] : await loadMoves(env, m.id);
   const opponent = seat === 0 && m.bot_style ? botPlayer(m) : player(seat === 0 ? m.seat1 : m.seat0);
   const pairs = pairsOf(rows);
-  const { resolved } = replay(m.seed, pairs);
+  const { resolved } = replay(m.seed, pairs, energiesOf(m));
   const pending = pairs[resolved.length] ?? [null, null];
   const orient = (s: number | null) => (s === null ? null : seat === 0 ? s : 1 - s);
   const firstServer = firstServerOf(m.seed);
@@ -251,6 +298,9 @@ const view = async (env: Env, m: MatchRow, seat: PlayerIndex, since = 0) => {
     you: player(seat === 0 ? m.seat0 : m.seat1),
     opponent,
     rated: m.rated === 1,
+    // Energy going in, from this seat's side.
+    energy: seat === 0 ? [m.energy0 ?? 1, m.energy1 ?? 1] : [m.energy1 ?? 1, m.energy0 ?? 1],
+    cup: (seat === 0 ? m.cup0 : m.cup1) ? { id: seat === 0 ? m.cup0 : m.cup1, round: m.cup_round, roundName: CUP_ROUNDS[m.cup_round ?? 0] } : null,
     firstServer: orient(firstServer),
     exchanges: resolved.slice(since).map((x) => orientExchange(x, seat)),
     exchangeCount: resolved.length,
@@ -311,7 +361,7 @@ const submitMove = async (req: Request, me: PlayerRow, env: Env, id: string) => 
   const data = await body(req);
   if (m.status === 'playing') {
     const pairs = pairsOf(await loadMoves(env, id));
-    const { match, resolved } = replay(m.seed, pairs);
+    const { match, resolved } = replay(m.seed, pairs, energiesOf(m));
     // A late or repeated submission is ignored; the reply shows what was played.
     if (Number(data.exchange) === resolved.length && !match.isOver) {
       if (!isValidChoice(data.choice, match.expectedChoice(seat))) throw new HttpError(400, 'Invalid choice');
@@ -327,17 +377,43 @@ const botStyleFor = (rating: number): StyleId => {
   return pool[crypto.getRandomValues(new Uint8Array(1))[0] % pool.length];
 };
 
-const startMatch = async (env: Env, seat0: string, seat1: string | null, bot: StyleId | null) => {
+interface Seat {
+  player: string | null;
+  energy: number;
+  cup: string | null;
+}
+
+const startMatch = async (env: Env, seat0: Seat, seat1: Seat, bot: StyleId | null, cupRound: number | null = null) => {
   const id = randomHex(8);
   const seed = crypto.getRandomValues(new Uint32Array(1))[0];
   const now = Date.now();
   const name = bot ? `${BOT_NAMES[crypto.getRandomValues(new Uint8Array(1))[0] % BOT_NAMES.length]} Bot` : null;
   await env.DB.prepare(
-    "INSERT INTO matches (id, code, seat0, seat1, seed, status, bot_style, bot_name, rated, created_at, started_at) VALUES (?, '', ?, ?, ?, 'playing', ?, ?, ?, ?, ?)",
+    `INSERT INTO matches (id, code, seat0, seat1, seed, status, bot_style, bot_name, rated, energy0, energy1, cup0, cup1, cup_round, created_at, started_at)
+     VALUES (?, '', ?, ?, ?, 'playing', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, seat0, seat1, seed, bot, name, bot ? 0 : 1, now, now)
+    .bind(id, seat0.player, seat1.player, seed, bot, name, bot ? 0 : 1, seat0.energy, seat1.energy, seat0.cup, seat1.cup, cupRound, now, now)
     .run();
   return id;
+};
+
+/** Who the player is looking for an opponent as: a single match, or a cup run in a given round. */
+interface Search {
+  pool: string;
+  energy: number;
+  cup: { id: string; round: number } | null;
+}
+
+const SINGLE: Search = { pool: 'single', energy: 1, cup: null };
+
+/** Cup bots get tougher each round: the final is always against the hardest-to-read style. */
+const cupBotStyle = (rating: number, round: number): StyleId => {
+  if (round >= 2) return 'balanced';
+  if (round === 1) {
+    const pool: StyleId[] = ['aggressor', 'touch', 'balanced'];
+    return pool[crypto.getRandomValues(new Uint8Array(1))[0] % pool.length];
+  }
+  return botStyleFor(rating);
 };
 
 /**
@@ -345,11 +421,11 @@ const startMatch = async (env: Env, seat0: string, seat1: string | null, bot: St
  * joins the queue. The browser calls it every second or so; after
  * MATCHMAKING_SECONDS with nobody found, a bot match starts instead.
  */
-const matchmaking = async (me: PlayerRow, env: Env) => {
+const matchmaking = async (me: PlayerRow, env: Env, search: Search = SINGLE): Promise<Response> => {
   const now = Date.now();
   let mine = await env.DB.prepare('SELECT * FROM queue WHERE player_id = ?')
     .bind(me.id)
-    .first<{ joined_at: number; last_seen: number; match_id: string | null }>();
+    .first<{ joined_at: number; last_seen: number; match_id: string | null; pool: string }>();
   // Someone paired with us since we last checked.
   if (mine?.match_id) {
     const m = await env.DB.prepare('SELECT * FROM matches WHERE id = ?').bind(mine.match_id).first<MatchRow>();
@@ -358,23 +434,29 @@ const matchmaking = async (me: PlayerRow, env: Env) => {
     await env.DB.prepare('DELETE FROM queue WHERE player_id = ?').bind(me.id).run();
     return view(env, m, 0);
   }
-  // An old entry from a search we abandoned: start the wait again.
-  if (mine && mine.last_seen < now - QUEUE_STALE_MS) {
+  // An old entry from a search we abandoned, or a search for something else: start the wait again.
+  if (mine && (mine.last_seen < now - QUEUE_STALE_MS || mine.pool !== search.pool)) {
     await env.DB.prepare('DELETE FROM queue WHERE player_id = ? AND match_id IS NULL').bind(me.id).run();
     mine = null;
   }
   // Pair with the closest-rated player who is still waiting.
   const other = await env.DB.prepare(
-    'SELECT player_id FROM queue WHERE player_id != ? AND match_id IS NULL AND last_seen > ? ORDER BY ABS(rating - ?), joined_at LIMIT 1',
+    'SELECT player_id, cup_id, energy FROM queue WHERE player_id != ? AND pool = ? AND match_id IS NULL AND last_seen > ? ORDER BY ABS(rating - ?), joined_at LIMIT 1',
   )
-    .bind(me.id, now - QUEUE_STALE_MS, me.rating)
-    .first<{ player_id: string }>();
+    .bind(me.id, search.pool, now - QUEUE_STALE_MS, me.rating)
+    .first<{ player_id: string; cup_id: string | null; energy: number }>();
   if (other) {
     // Claim them first, so two players can't both take the same opponent.
     const placeholder = randomHex(8);
     const claimed = await env.DB.prepare('UPDATE queue SET match_id = ? WHERE player_id = ? AND match_id IS NULL').bind(placeholder, other.player_id).run();
     if (claimed.meta.changes === 1) {
-      const id = await startMatch(env, other.player_id, me.id, null);
+      const id = await startMatch(
+        env,
+        { player: other.player_id, energy: other.energy, cup: other.cup_id },
+        { player: me.id, energy: search.energy, cup: search.cup?.id ?? null },
+        null,
+        search.cup?.round ?? null,
+      );
       await env.DB.batch([
         env.DB.prepare('UPDATE queue SET match_id = ? WHERE player_id = ?').bind(id, other.player_id),
         env.DB.prepare('DELETE FROM queue WHERE player_id = ?').bind(me.id),
@@ -383,7 +465,9 @@ const matchmaking = async (me: PlayerRow, env: Env) => {
     }
   }
   if (!mine) {
-    await env.DB.prepare('INSERT INTO queue (player_id, rating, joined_at, last_seen) VALUES (?, ?, ?, ?)').bind(me.id, me.rating, now, now).run();
+    await env.DB.prepare('INSERT INTO queue (player_id, rating, joined_at, last_seen, pool, cup_id, energy) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(me.id, me.rating, now, now, search.pool, search.cup?.id ?? null, search.energy)
+      .run();
     return json({ waiting: true, secondsLeft: MATCHMAKING_SECONDS });
   }
   const waited = now - mine.joined_at;
@@ -393,9 +477,131 @@ const matchmaking = async (me: PlayerRow, env: Env) => {
   }
   // Nobody came: leave the queue (unless someone paired with us this instant) and play a bot.
   const left = await env.DB.prepare('DELETE FROM queue WHERE player_id = ? AND match_id IS NULL').bind(me.id).run();
-  if (left.meta.changes !== 1) return matchmaking(me, env);
-  const id = await startMatch(env, me.id, null, botStyleFor(me.rating));
+  if (left.meta.changes !== 1) return matchmaking(me, env, search);
+  const round = search.cup?.round ?? null;
+  const id = await startMatch(
+    env,
+    { player: me.id, energy: search.energy, cup: search.cup?.id ?? null },
+    { player: null, energy: round === null ? 1 : CUP_BOT_ENERGY[round], cup: null },
+    round === null ? botStyleFor(me.rating) : cupBotStyle(me.rating, round),
+    round,
+  );
   return view(env, await advance(env, id), 0);
+};
+
+// ------------------------------------------------------------------ online cup
+
+interface CupRow {
+  id: string;
+  player_id: string;
+  number: number;
+  status: 'playing' | 'won' | 'lost' | 'abandoned';
+  round: number;
+  energy: number;
+  rating_start: number;
+  rating_end: number | null;
+  started_at: number;
+  finished_at: number | null;
+}
+
+const loadCup = async (env: Env, id: string, me: PlayerRow) => {
+  const c = await env.DB.prepare('SELECT * FROM cup_runs WHERE id = ?').bind(id).first<CupRow>();
+  if (!c || c.player_id !== me.id) throw new HttpError(404, 'Cup not found');
+  return c;
+};
+
+/** The cup's match in progress, if any. */
+const cupMatchInPlay = (env: Env, cupId: string) =>
+  env.DB.prepare("SELECT * FROM matches WHERE (cup0 = ? OR cup1 = ?) AND status = 'playing' LIMIT 1").bind(cupId, cupId).first<MatchRow>();
+
+/** A cup run with each round played so far: opponent, result and score, from the player's side. */
+const cupView = async (env: Env, c: CupRow) => {
+  const { results } = await env.DB.prepare('SELECT * FROM matches WHERE cup0 = ? OR cup1 = ? ORDER BY cup_round').bind(c.id, c.id).all<MatchRow>();
+  const rounds = [];
+  for (const m of results) {
+    const seat: PlayerIndex = m.cup0 === c.id ? 0 : 1;
+    const oppId = seat === 0 ? m.seat1 : m.seat0;
+    const opp = m.bot_style
+      ? botPlayer(m)
+      : oppId
+        ? await env.DB.prepare('SELECT id, nickname, tag, rating FROM players WHERE id = ?').bind(oppId).first<PlayerRow>().then((p) => (p ? publicPlayer(p) : null))
+        : null;
+    const { match } = replay(m.seed, pairsOf(await loadMoves(env, m.id)), energiesOf(m));
+    rounds.push({
+      round: m.cup_round,
+      roundName: CUP_ROUNDS[m.cup_round ?? 0],
+      matchId: m.id,
+      opponent: opp,
+      status: m.status,
+      won: m.status === 'finished' ? m.winner === seat : null,
+      resigned: m.resigned === null ? null : m.resigned === seat ? 'you' : 'opponent',
+      sets: match.score.completedSets.map((s) => (seat === 0 ? s : [s[1], s[0]])),
+      ratingChange: m.rating_change === null || m.status !== 'finished' ? null : m.winner === seat ? m.rating_change : -m.rating_change,
+      energy: seat === 0 ? m.energy0 : m.energy1,
+    });
+  }
+  return {
+    id: c.id,
+    number: c.number,
+    status: c.status,
+    round: c.round,
+    roundName: CUP_ROUNDS[c.round],
+    energy: c.energy,
+    ratingStart: c.rating_start,
+    ratingEnd: c.rating_end,
+    startedAt: c.started_at,
+    finishedAt: c.finished_at,
+    rounds,
+  };
+};
+
+const currentCup = (env: Env, me: PlayerRow) =>
+  env.DB.prepare("SELECT * FROM cup_runs WHERE player_id = ? AND status = 'playing' ORDER BY started_at DESC LIMIT 1").bind(me.id).first<CupRow>();
+
+/** Starts a new cup run, or returns the one already in progress. */
+const startCup = async (me: PlayerRow, env: Env) => {
+  const existing = await currentCup(env, me);
+  if (existing) return json({ cup: await cupView(env, existing) });
+  const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM cup_runs WHERE player_id = ?').bind(me.id).first<{ n: number }>();
+  const id = randomHex(8);
+  await env.DB.prepare("INSERT INTO cup_runs (id, player_id, number, status, round, energy, rating_start, started_at) VALUES (?, ?, ?, 'playing', 0, 1, ?, ?)")
+    .bind(id, me.id, (count?.n ?? 0) + 1, me.rating, Date.now())
+    .run();
+  return json({ cup: await cupView(env, (await loadCup(env, id, me))!) }, 201);
+};
+
+/** Matchmaking for the cup's next round: players at the same round of their own cup, or a bot. */
+const cupNext = async (me: PlayerRow, env: Env, id: string) => {
+  const c = await loadCup(env, id, me);
+  if (c.status !== 'playing') throw new HttpError(409, 'This cup is over');
+  const inPlay = await cupMatchInPlay(env, c.id);
+  if (inPlay) return view(env, await advance(env, inPlay.id), seatOf(inPlay, me.id));
+  return matchmaking(me, env, { pool: `cup:${c.round}`, energy: c.energy, cup: { id: c.id, round: c.round } });
+};
+
+/** Leaves a cup: resigns its match in progress and marks the run abandoned. */
+const abandonCup = async (me: PlayerRow, env: Env, id: string) => {
+  const c = await loadCup(env, id, me);
+  if (c.status !== 'playing') return json({ cup: await cupView(env, c) });
+  await env.DB.prepare('DELETE FROM queue WHERE player_id = ? AND match_id IS NULL').bind(me.id).run();
+  const inPlay = await cupMatchInPlay(env, c.id);
+  if (inPlay) {
+    const seat = seatOf(inPlay, me.id);
+    await finish(env, await advance(env, inPlay.id), (1 - seat) as PlayerIndex, seat);
+  }
+  const rating = (await env.DB.prepare('SELECT rating FROM players WHERE id = ?').bind(me.id).first<{ rating: number }>())?.rating ?? me.rating;
+  // A run that just ended as a loss still counts as abandoned: the player chose to leave.
+  await env.DB.prepare("UPDATE cup_runs SET status = 'abandoned', rating_end = ?, finished_at = COALESCE(finished_at, ?) WHERE id = ? AND status IN ('playing', 'lost')")
+    .bind(rating, Date.now(), c.id)
+    .run();
+  return json({ cup: await cupView(env, await loadCup(env, id, me)) });
+};
+
+const cupHistory = async (me: PlayerRow, env: Env) => {
+  const { results } = await env.DB.prepare('SELECT * FROM cup_runs WHERE player_id = ? ORDER BY started_at DESC LIMIT 20').bind(me.id).all<CupRow>();
+  const cups = [];
+  for (const c of results) cups.push(await cupView(env, c));
+  return json({ cups });
 };
 
 const cancelMatchmaking = async (me: PlayerRow, env: Env) => {
@@ -442,7 +648,7 @@ const history = async (me: PlayerRow, env: Env) => {
   const matches = [];
   for (const m of results) {
     const seat: PlayerIndex = m.seat0 === me.id ? 0 : 1;
-    const { match } = replay(m.seed, pairsOf(await loadMoves(env, m.id)));
+    const { match } = replay(m.seed, pairsOf(await loadMoves(env, m.id)), energiesOf(m));
     const opp = others.find((p) => p.id === (seat === 0 ? m.seat1 : m.seat0));
     const won = m.winner === seat;
     matches.push({
@@ -450,6 +656,7 @@ const history = async (me: PlayerRow, env: Env) => {
       finishedAt: m.finished_at,
       opponent: m.bot_style ? botPlayer(m) : opp ? publicPlayer(opp) : null,
       won,
+      cupRound: m.cup_round === null ? null : CUP_ROUNDS[m.cup_round],
       resigned: m.resigned === null ? null : m.resigned === seat ? 'you' : 'opponent',
       sets: match.score.completedSets.map((s) => (seat === 0 ? s : [s[1], s[0]])),
       ratingChange: m.rating_change === null ? null : won ? m.rating_change : -m.rating_change,
@@ -477,6 +684,16 @@ const route = async (req: Request, env: Env): Promise<Response> => {
   if (path === '/api/matches/join' && method === 'POST') return joinMatch(req, me, env);
   if (path === '/api/matchmaking' && method === 'POST') return matchmaking(me, env);
   if (path === '/api/matchmaking/cancel' && method === 'POST') return cancelMatchmaking(me, env);
+  if (path === '/api/cups' && method === 'POST') return startCup(me, env);
+  if (path === '/api/cups' && method === 'GET') return cupHistory(me, env);
+  if (path === '/api/cups/current' && method === 'GET') {
+    const c = await currentCup(env, me);
+    return json({ cup: c ? await cupView(env, c) : null });
+  }
+  const cupGet = path.match(/^\/api\/cups\/([0-9a-f]{16})$/);
+  if (cupGet && method === 'GET') return json({ cup: await cupView(env, await loadCup(env, cupGet[1], me)) });
+  const cupPath = path.match(/^\/api\/cups\/([0-9a-f]{16})\/(next|abandon)$/);
+  if (cupPath && method === 'POST') return cupPath[2] === 'next' ? cupNext(me, env, cupPath[1]) : abandonCup(me, env, cupPath[1]);
   const matchPath = path.match(/^\/api\/matches\/([0-9a-f]{16})(\/moves|\/resign)?$/);
   if (matchPath && !matchPath[2] && method === 'GET') {
     const m = await advance(env, matchPath[1]);

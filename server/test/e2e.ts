@@ -129,7 +129,59 @@ const main = async () => {
   assert(eve.player.rating === 1000, 'rating unchanged after a bot match');
   const eh = await call('/api/me/matches', e.token);
   assert(eh.matches[0].opponent.bot && eh.matches[0].ratingChange === null, 'history shows the bot match');
-  console.log(`OK: ${exchange} exchanges, sets ${JSON.stringify(la.score.completedSets)}, Alice ${meA.player.rating}, Bob ${meB.player.rating}; bot match ${n} exchanges vs ${bot.opponent.nickname} (${bot.opponent.bot.style})`);
+  // Online Cup, alone: every round against a bot, energy carried over, until the run ends.
+  const f = await call('/api/players', undefined, { nickname: 'Finn' });
+  let cup = (await call('/api/cups', f.token, {})).cup;
+  assert(cup.status === 'playing' && cup.round === 0 && cup.number === 1 && cup.energy === 1, 'a new cup starts at the quarterfinal, fresh');
+  assert((await call('/api/cups', f.token, {})).cup.id === cup.id, 'starting again returns the cup in progress');
+  const cupLog: string[] = [];
+  while (cup.status === 'playing') {
+    const energyIn = cup.energy;
+    let r = await call(`/api/cups/${cup.id}/next`, f.token, {});
+    while (r.waiting) {
+      await new Promise((res) => setTimeout(res, 1000));
+      r = await call(`/api/cups/${cup.id}/next`, f.token, {});
+    }
+    assert(r.cup && r.cup.round === cup.round && r.opponent.bot && !r.rated, `a bot in the ${cup.roundName}`);
+    assert(r.energy[0] === energyIn, 'the player brings their carried energy');
+    assert(r.energy[1] === [1, 0.85, 0.75][cup.round], 'the bot is as rested as a typical player at this round');
+    if (cup.round === 2) assert(r.opponent.bot.style === 'balanced', 'the final bot plays Balanced');
+    const m = newOnlineMatch(['Me', 'Bot'], r.firstServer as PlayerIndex, r.energy);
+    let k = 0;
+    while (r.status === 'playing') {
+      r = await call(`/api/matches/${r.id}/moves`, f.token, { exchange: k, choice: ai.choose(m, 0), since: k });
+      for (const x of r.exchanges as ResolvedExchange[]) playExchange(m, x.choices, replayRng(x.rolls));
+      k++;
+    }
+    const next = (await call('/api/cups/current', f.token)).cup ?? (await call(`/api/cups/${cup.id}`, f.token)).cup;
+    cupLog.push(`${cup.roundName} ${r.winner === 0 ? 'W' : 'L'}`);
+    if (r.winner === 0 && cup.round < 2) {
+      assert(next.status === 'playing' && next.round === cup.round + 1, 'a win moves the run to the next round');
+      assert(Math.abs(next.energy - Math.min(1, m.energy[0] + 0.3)) < 0.002, 'energy carries over with a 30% rest');
+    } else {
+      assert(next.status === (r.winner === 0 ? 'won' : 'lost') && next.round === cup.round && next.ratingEnd === 1000, 'the run ends here');
+    }
+    cup = next;
+  }
+  assert(cup.rounds.length === cupLog.length && cup.rounds.every((x: any) => x.opponent.bot && x.won !== null), 'the run keeps every round with its opponent');
+
+  // Two players at the same round meet each other; leaving the cup hands the opponent the round.
+  const g = await call('/api/players', undefined, { nickname: 'Gus' });
+  const h = await call('/api/players', undefined, { nickname: 'Hana' });
+  const cg = (await call('/api/cups', g.token, {})).cup;
+  const ch = (await call('/api/cups', h.token, {})).cup;
+  assert((await call(`/api/cups/${cg.id}/next`, g.token, {})).waiting, 'the first cup player waits');
+  const meet = await call(`/api/cups/${ch.id}/next`, h.token, {});
+  assert(meet.status === 'playing' && meet.opponent.nickname === 'Gus' && meet.rated && meet.cup.round === 0, 'two quarterfinalists are paired, rated');
+  const left = (await call(`/api/cups/${cg.id}/abandon`, g.token, {})).cup;
+  assert(left.status === 'abandoned', 'leaving the cup ends the run');
+  const hNow = (await call('/api/cups/current', h.token)).cup;
+  assert(hNow.round === 1 && hNow.rounds[0].won && hNow.rounds[0].resigned === 'opponent', 'the opponent goes through to the semifinal');
+  const cupHist = (await call('/api/cups', g.token)).cups;
+  assert(cupHist.length === 1 && cupHist[0].rounds[0].opponent.nickname === 'Hana', 'cup history lists the run and its opponents');
+  await call(`/api/cups/${ch.id}/abandon`, h.token, {});
+
+  console.log(`OK: ${exchange} exchanges, sets ${JSON.stringify(la.score.completedSets)}, Alice ${meA.player.rating}, Bob ${meB.player.rating}; bot match ${n} exchanges vs ${bot.opponent.nickname} (${bot.opponent.bot.style}); cup ${cupLog.join(', ')} → ${cup.status}`);
 };
 
 main().catch((e) => {

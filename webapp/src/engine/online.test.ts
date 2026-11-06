@@ -14,12 +14,12 @@ import {
 } from './online';
 
 /** Plays a whole match between two random choosers, recording the moves as the server would. */
-const playRandomMatch = (seed: number) => {
+const playRandomMatch = (seed: number, energy: [number, number] = [1, 1]) => {
   const pick = seededRng(seed + 1);
   const ai = [new AiOpponent(pick), new AiOpponent(pick)];
   const moves: [Choice, Choice][] = [];
   for (;;) {
-    const { match } = replay(seed, moves);
+    const { match } = replay(seed, moves, energy);
     if (match.isOver) return { match, moves };
     moves.push([ai[0].choose(match, 0), ai[1].choose(match, 1)]);
   }
@@ -55,6 +55,16 @@ describe('online matches', () => {
       expect(local.score.completedSets).toEqual(mine);
       expect(local.score.winner).toBe(seat === 0 ? match.score.winner : 1 - match.score.winner!);
     }
+  });
+
+  it('starts a match from the energies given, so cup rounds carry it over', () => {
+    const { match, moves } = playRandomMatch(5, [0.4, 0.9]);
+    // Tired legs from the first point on: player 0 starts well below player 1.
+    expect(newOnlineMatch(['A', 'B'], 0, [0.4, 0.9]).energy).toEqual([0.4, 0.9]);
+    const again = replay(5, moves, [0.4, 0.9]).match;
+    expect(again.score.completedSets).toEqual(match.score.completedSets);
+    expect(again.energy).toEqual(match.energy);
+    expect(again.energy[0]).toBeLessThan(0.4 + 0.2);
   });
 
   it('checks that a choice is well formed and of the expected kind', () => {

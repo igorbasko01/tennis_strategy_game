@@ -1,7 +1,7 @@
 import { duelVerdict, type FactorId } from '../engine/verdict';
 import { matchReview, type BestRead } from '../engine/review';
 import { ONLINE_SKILL, replayRng, type ResolvedExchange } from '../engine/online';
-import { api, ApiError, displayName, inviteLink, loadIdentity, saveIdentity, type MatchView } from '../online/client';
+import { api, ApiError, CUP_ROUND_NAMES, displayName, inviteLink, loadIdentity, saveIdentity, type Cup, type MatchmakingResult, type MatchView } from '../online/client';
 import {
   ATTACK_ACTIONS,
   ATTACK_COST,
@@ -274,6 +274,8 @@ export class App {
   private onlineGen = 0;
   /** An unfinished online match found on the server, offered for resuming. */
   private activeOnline: MatchView | null = null;
+  /** The player's Online Cup in progress, if any. */
+  private activeCup: Cup | null = null;
 
   constructor() {
     this.scene = new CourtScene($('#stage'));
@@ -667,8 +669,9 @@ export class App {
       <h2>${escapeHtml(title)}</h2>
       ${why ? `<p class="tagline">${escapeHtml(why)}</p>` : ''}
       ${view.ratingChange === null ? '' : `<p class="tagline">Online rating ${fmtRating(view.ratingChange)}</p>`}
-      <button class="primary big" data-act="online-home">Back to online</button>
+      ${view.cup ? '<button class="primary big" data-act="cup-home">Back to the Cup</button>' : '<button class="primary big" data-act="online-home">Back to online</button>'}
       <button class="ghost" data-act="menu">Main menu</button>`);
+    $('#online').querySelector('[data-act="cup-home"]')?.addEventListener('click', () => void this.openCup(view.cup!.id));
     this.match = null;
     $('#panel').innerHTML = '';
   }
@@ -724,7 +727,7 @@ export class App {
       scoring: MATCH_SCORING,
       tournament: false,
       cpuStyle: view.opponent?.bot?.style ?? 'balanced',
-      energy: [FULL_ENERGY, FULL_ENERGY],
+      energy: view.energy ?? [FULL_ENERGY, FULL_ENERGY],
       online: {
         id: view.id,
         token,
@@ -792,17 +795,29 @@ export class App {
       ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
       ${this.activeOnline ? `<button class="primary big" data-act="resume">Resume match vs ${escapeHtml(this.activeOnline.opponent?.nickname ?? 'opponent')}</button>` : ''}
       <button class="primary big" data-act="find">Find an opponent</button>
+      <button class="primary big" data-act="cup">${this.activeCup ? `Continue Cup #${this.activeCup.number} · ${escapeHtml(this.activeCup.roundName)}` : '🏆 Online Cup'}</button>
       <button class="primary big" data-act="invite">Invite a friend</button>
       <button class="ghost" data-act="join">Join with a code</button>
       <button class="ghost" data-act="history">Online history</button>
+      <button class="ghost" data-act="cups">Cup history</button>
       <button class="ghost" data-act="recovery">Recovery code</button>
       <button class="ghost" data-act="menu">Main menu</button>`);
     const el = $('#online');
     el.querySelector('[data-act="resume"]')?.addEventListener('click', () => void this.resumeOnline());
     el.querySelector('[data-act="find"]')!.addEventListener('click', () => void this.findOpponent());
+    el.querySelector('[data-act="cup"]')!.addEventListener('click', () => void this.startOrContinueCup());
     el.querySelector('[data-act="invite"]')!.addEventListener('click', () => void this.inviteOnline());
     el.querySelector('[data-act="join"]')!.addEventListener('click', () => this.renderOnlineJoin());
     el.querySelector('[data-act="history"]')!.addEventListener('click', () => void this.renderOnlineHistory());
+    el.querySelector('[data-act="cups"]')!.addEventListener('click', () => void this.renderCupHistory());
+    api
+      .currentCup(id.token)
+      .then(({ cup }) => {
+        if (gen !== this.onlineGen || (cup?.id ?? null) === (this.activeCup?.id ?? null) && cup?.round === this.activeCup?.round) return;
+        this.activeCup = cup;
+        this.renderOnline(error);
+      })
+      .catch(() => undefined);
     el.querySelector('[data-act="recovery"]')!.addEventListener('click', () => this.renderOnlineRecovery());
     // Refresh the rating, and look for a match to resume, in the background.
     const gen = this.onlineGen;
@@ -836,29 +851,37 @@ export class App {
   }
 
   /** Matchmaking: a person if one is looking, otherwise a bot after a short wait. */
-  private async findOpponent(): Promise<void> {
+  private findOpponent(): Promise<void> {
+    return this.searchOpponent('Find an opponent', 'If nobody is around, you’ll play a bot instead (unrated).', () => api.matchmaking(this.identity!.token), () =>
+      this.renderOnline(),
+    );
+  }
+
+  /** Polls matchmaking until a match is found, then starts it. */
+  private async searchOpponent(title: string, note: string, poll: () => Promise<MatchmakingResult>, cancel: () => void): Promise<void> {
     const id = this.identity!;
     this.renderOnlineCard(`
-      <h2>Find an opponent</h2>
+      <h2>${escapeHtml(title)}</h2>
       <p class="waiting">Looking for an opponent…</p>
-      <p class="small">If nobody is around, you’ll play a bot instead (unrated).</p>
+      <p class="small">${escapeHtml(note)}</p>
       <button class="ghost" data-act="cancel">Cancel</button>`);
     const gen = this.onlineGen;
     const el = $('#online');
     el.querySelector('[data-act="cancel"]')!.addEventListener('click', () => {
       void api.cancelMatchmaking(id.token).catch(() => undefined);
-      this.renderOnline();
+      cancel();
     });
     let failures = 0;
     while (gen === this.onlineGen) {
       try {
-        const r = await api.matchmaking(id.token);
+        const r = await poll();
         failures = 0;
         if (gen !== this.onlineGen) return;
         if ('waiting' in r) {
           el.querySelector('.waiting')!.textContent = `Looking for an opponent… ${r.secondsLeft}s, then a bot`;
         } else {
-          this.startOnlineMatch(r, id.token);
+          // A match already under way (e.g. a cup round after a reload) catches up first.
+          this.startOnlineMatch(r, id.token, r.exchangeCount > 0 || r.current.youLocked);
           return;
         }
       } catch (e) {
@@ -868,6 +891,126 @@ export class App {
         }
       }
       await sleep(1000);
+    }
+  }
+
+  // ---------------------------------------------------------------- online cup
+
+  private async startOrContinueCup(): Promise<void> {
+    const id = this.identity!;
+    try {
+      const { cup } = await api.startCup(id.token);
+      this.activeCup = cup;
+      this.renderCup(cup);
+    } catch (e) {
+      this.renderOnline((e as Error).message);
+    }
+  }
+
+  private async openCup(cupId: string): Promise<void> {
+    this.onlineGen++;
+    try {
+      const { cup } = await api.cup(this.identity!.token, cupId);
+      this.activeCup = cup.status === 'playing' ? cup : null;
+      this.renderCup(cup);
+    } catch (e) {
+      this.renderOnline((e as Error).message);
+    }
+  }
+
+  /** One line per round: the result once played, the next round to play, or nothing yet. */
+  private cupPath(cup: Cup): string {
+    return CUP_ROUND_NAMES.map((name, r) => {
+      const played = cup.rounds.find((x) => x.round === r);
+      let result: string;
+      let tone = '';
+      if (played && played.won !== null) {
+        tone = played.won ? 'w' : 'l';
+        const how = played.resigned ? (played.resigned === 'you' ? 'you resigned' : 'they resigned') : played.sets.map((s) => `${s[0]}–${s[1]}`).join(' ');
+        result = `${played.won ? 'Beat' : 'Lost to'} ${played.opponent ? escapeHtml(displayName(played.opponent)) : 'opponent'} · ${how}`;
+      } else if (played) {
+        result = `Playing ${played.opponent ? escapeHtml(displayName(played.opponent)) : 'opponent'}`;
+      } else if (cup.status === 'playing' && r === cup.round) {
+        result = 'Next';
+        tone = 'next';
+      } else {
+        result = '—';
+      }
+      return `<li class="${tone}"><span class="round-name">${name}</span><span class="cup-result">${result}</span></li>`;
+    }).join('');
+  }
+
+  private renderCup(cup: Cup): void {
+    this.onlineGen++;
+    const playing = cup.status === 'playing';
+    const inPlay = cup.rounds.find((r) => r.status === 'playing');
+    const headline =
+      cup.status === 'won'
+        ? '🏆 Cup won!'
+        : cup.status === 'lost'
+          ? `Knocked out in the ${cup.roundName.toLowerCase()}`
+          : cup.status === 'abandoned'
+            ? 'You left this cup'
+            : `${cup.roundName} next · your energy ${Math.round(cup.energy * 100)}%`;
+    this.renderOnlineCard(`
+      <h2>Online Cup #${cup.number}</h2>
+      <p class="tagline">${escapeHtml(headline)}</p>
+      <ul class="cup-path">${this.cupPath(cup)}</ul>
+      ${
+        playing
+          ? `<button class="primary big" data-act="cup-next">${inPlay ? `Resume ${inPlay.roundName.toLowerCase()}` : `Find ${cup.roundName.toLowerCase()} opponent`}</button>
+             <p class="small">Each round you play someone at the same round of their cup, or a bot if nobody turns up. Your energy carries over, with a 30% rest after each match.</p>
+             <button class="ghost danger" data-act="cup-leave">Leave the cup</button>`
+          : `<button class="primary big" data-act="cup-new">Play another cup</button>`
+      }
+      <button class="ghost" data-act="online-home">Back to online</button>`);
+    const el = $('#online');
+    el.querySelector('[data-act="cup-next"]')?.addEventListener('click', () => {
+      const token = this.identity!.token;
+      void this.searchOpponent(
+        `Online Cup · ${cup.roundName}`,
+        'Looking for another player at the same round. If nobody turns up, you’ll play a bot (unrated).',
+        () => api.cupNext(token, cup.id),
+        () => this.renderCup(cup),
+      );
+    });
+    el.querySelector('[data-act="cup-leave"]')?.addEventListener('click', async () => {
+      if (!window.confirm('Leave this cup? It ends your run here.')) return;
+      try {
+        const { cup: left } = await api.abandonCup(this.identity!.token, cup.id);
+        this.activeCup = null;
+        this.renderCup(left);
+      } catch (e) {
+        this.renderOnline((e as Error).message);
+      }
+    });
+    el.querySelector('[data-act="cup-new"]')?.addEventListener('click', () => void this.startOrContinueCup());
+  }
+
+  private async renderCupHistory(): Promise<void> {
+    const id = this.identity!;
+    this.renderOnlineCard(`<h2>Cup history</h2><p class="tbd">Loading…</p><button class="ghost" data-act="online-home">Back</button>`);
+    try {
+      const { cups } = await api.cupHistory(id.token);
+      const cards = cups
+        .map((c) => {
+          const outcome =
+            c.status === 'won' ? '🏆 Champion' : c.status === 'lost' ? `Out in the ${c.roundName.toLowerCase()}` : c.status === 'abandoned' ? 'Left' : `In progress · ${c.roundName}`;
+          const date = new Date(c.startedAt).toLocaleDateString();
+          return `
+          <section class="history-card">
+            <div class="history-head"><h3>Cup #${c.number}</h3><span class="outcome ${c.status === 'won' ? 'won' : c.status === 'playing' ? 'live' : 'out'}">${outcome}</span></div>
+            <p class="skill-change">${date}${c.ratingEnd !== null ? ` · rating ${c.ratingStart} → ${c.ratingEnd}` : ''}</p>
+            <ul class="cup-path">${this.cupPath(c)}</ul>
+          </section>`;
+        })
+        .join('');
+      this.renderOnlineCard(`
+        <h2>Cup history</h2>
+        ${cards ? `<div class="history">${cards}</div>` : '<p class="tbd">No cups yet.</p>'}
+        <button class="ghost" data-act="online-home">Back</button>`);
+    } catch (e) {
+      this.renderOnline((e as Error).message);
     }
   }
 
@@ -952,7 +1095,7 @@ export class App {
           (m) => `
           <li>
             <span class="result ${m.won ? 'w' : 'l'}">${m.won ? 'W' : 'L'}</span>
-            <span class="opp">${m.opponent ? escapeHtml(displayName(m.opponent)) : 'Unknown'}</span>
+            <span class="opp">${m.opponent ? escapeHtml(displayName(m.opponent)) : 'Unknown'}${m.cupRound ? ` <small class="cup-tag">🏆 ${escapeHtml(m.cupRound)}</small>` : ''}</span>
             <span class="score">${m.resigned ? (m.resigned === 'you' ? 'you resigned' : 'they resigned') : m.sets.map((s) => `${s[0]}–${s[1]}`).join(' ')}</span>
             <span class="rating">${m.ratingChange === null ? '' : fmtRating(m.ratingChange)}</span>
           </li>`,
@@ -1235,6 +1378,12 @@ export class App {
         : change === null
           ? 'Online match'
           : `Online rating ${fmtRating(change)} → ${online.view.you.rating}`;
+      const cup = online.view.cup;
+      if (cup) {
+        const won = online.view.winner === 0;
+        const title = won ? (cup.round === CUP_ROUND_NAMES.length - 1 ? '🏆 Cup won!' : `Through to the ${CUP_ROUND_NAMES[cup.round + 1].toLowerCase()}`) : `Knocked out in the ${cup.roundName.toLowerCase()}`;
+        subtitle = `${title} · ${subtitle}`;
+      }
     }
     const el = $('#over');
     el.innerHTML = `
@@ -1255,7 +1404,9 @@ export class App {
           inTournament
             ? '<button class="primary big" data-act="bracket">Continue</button>'
             : online
-              ? '<button class="primary big" data-act="online-home">Back to online</button>'
+              ? online.view.cup
+                ? '<button class="primary big" data-act="cup-home">Back to the Cup</button>'
+                : '<button class="primary big" data-act="online-home">Back to online</button>'
               : '<button class="primary big" data-act="again">Play again</button>'
         }
         <button class="ghost" data-act="menu">Main menu</button>
@@ -1264,6 +1415,7 @@ export class App {
     el.querySelector('[data-act="again"]')?.addEventListener('click', () => this.startMatch(this.setup!));
     el.querySelector('[data-act="bracket"]')?.addEventListener('click', () => this.renderTournament());
     el.querySelector('[data-act="online-home"]')?.addEventListener('click', () => this.renderOnline());
+    el.querySelector('[data-act="cup-home"]')?.addEventListener('click', () => void this.openCup(online!.view.cup!.id));
     el.querySelector('[data-act="coach"]')?.addEventListener('click', () => {
       this.storeTournament(buyCoaching(this.tournament!));
       savePlayerSkill(this.tournament!.entrants[HUMAN].skill);
@@ -1623,6 +1775,10 @@ export class App {
       <p>Find an opponent pairs you with another player who is looking, closest rating first. If nobody turns up
       within 15 seconds you play a bot instead: it's shown as 🤖 with its playing style, it can't see your choices,
       and bot matches don't change your rating.</p>
+      <p>The Online Cup is three rounds: quarterfinal, semifinal and final. Each round you play someone who is at
+      the same round of their own cup, or a bot if nobody turns up, and the bots get tougher each round. Lose and
+      you're out; win the final and you take the cup. Your energy carries from round to round with a 30% rest after
+      each match. Cup history keeps every run with its results and opponents.</p>
       <p>Play online can also invite a friend by link or code. Both of you play at skill 0.50, so only your decisions and the
       dice count. Choices are revealed together once both of you have locked in, and there's no time limit. If you
       reload or come back later, Resume online match picks up where you left off; Resign (in the menu) ends it as a loss. Your
