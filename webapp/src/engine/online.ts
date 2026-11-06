@@ -31,7 +31,12 @@ export interface ResolvedExchange {
   rolls: number[];
 }
 
-export const newOnlineMatch = (names: [string, string], firstServer: PlayerIndex): Match =>
+/** `energy` is each seat's energy going in: full, except in a cup where it carries between rounds. */
+export const newOnlineMatch = (
+  names: [string, string],
+  firstServer: PlayerIndex,
+  energy: readonly [number, number] = [FULL_ENERGY, FULL_ENERGY],
+): Match =>
   new Match(
     [
       { name: names[0], skill: ONLINE_SKILL },
@@ -39,7 +44,7 @@ export const newOnlineMatch = (names: [string, string], firstServer: PlayerIndex
     ],
     MATCH_SCORING,
     firstServer,
-    [FULL_ENERGY, FULL_ENERGY],
+    energy,
   );
 
 /** Who serves first, from the seed (seat 0 or 1). */
@@ -71,8 +76,12 @@ export const replayRng = (rolls: readonly number[]): Rng => {
  * Replays a match from its seed and the moves so far (by exchange, one choice per seat).
  * Stops at the first exchange that doesn't have both choices yet, or when the match is over.
  */
-export const replay = (seed: number, moves: ReadonlyArray<[Choice | null, Choice | null]>) => {
-  const match = newOnlineMatch(['Seat 0', 'Seat 1'], firstServerOf(seed));
+export const replay = (
+  seed: number,
+  moves: ReadonlyArray<[Choice | null, Choice | null]>,
+  energy: readonly [number, number] = [FULL_ENERGY, FULL_ENERGY],
+) => {
+  const match = newOnlineMatch(['Seat 0', 'Seat 1'], firstServerOf(seed), energy);
   const rng = seededRng(seed);
   const resolved: ResolvedExchange[] = [];
   for (const pair of moves) {

@@ -1445,3 +1445,47 @@ button.ghost.danger {
   color: var(--bad);
   border-color: rgba(255, 138, 115, 0.5);
 }
+
+.cup-path {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.cup-path li {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+}
+
+.cup-path .round-name {
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.cup-path li.w .cup-result {
+  color: var(--good);
+}
+
+.cup-path li.l .cup-result {
+  color: var(--bad);
+}
+
+.cup-path li.next .cup-result {
+  color: var(--lime);
+  font-weight: 700;
+}
+
+.cup-tag {
+  color: var(--muted);
+  font-size: 11px;
+}

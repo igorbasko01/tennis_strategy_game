@@ -34,6 +34,10 @@ export interface MatchView {
   opponent: OnlinePlayer | null;
   /** False for bot matches, which don't change ratings. */
   rated: boolean;
+  /** Each player's energy going in (you first): full, except in a cup. */
+  energy: [number, number];
+  /** Set when this match is a round of your Online Cup. */
+  cup: { id: string; round: number; roundName: string } | null;
   firstServer: PlayerIndex;
   /** Resolved exchanges from the `since` asked for. */
   exchanges: ResolvedExchange[];
@@ -50,10 +54,46 @@ export interface HistoryEntry {
   finishedAt: number;
   opponent: OnlinePlayer | null;
   won: boolean;
+  /** The cup round, when the match was part of an Online Cup. */
+  cupRound: string | null;
   resigned: 'you' | 'opponent' | null;
   sets: [number, number][];
   ratingChange: number | null;
 }
+
+/** One round of an Online Cup run, from the player's side. */
+export interface CupRound {
+  round: number;
+  roundName: string;
+  matchId: string;
+  opponent: OnlinePlayer | null;
+  status: 'playing' | 'finished';
+  won: boolean | null;
+  resigned: 'you' | 'opponent' | null;
+  sets: [number, number][];
+  ratingChange: number | null;
+  /** Your energy going into that round. */
+  energy: number;
+}
+
+/** An Online Cup run: quarterfinal, semifinal and final, each against a player at the same round or a bot. */
+export interface Cup {
+  id: string;
+  number: number;
+  status: 'playing' | 'won' | 'lost' | 'abandoned';
+  /** The round being played or next; the round reached once the cup is over. */
+  round: number;
+  roundName: string;
+  /** Energy going into the next round. */
+  energy: number;
+  ratingStart: number;
+  ratingEnd: number | null;
+  startedAt: number;
+  finishedAt: number | null;
+  rounds: CupRound[];
+}
+
+export const CUP_ROUND_NAMES = ['Quarterfinal', 'Semifinal', 'Final'];
 
 const IDENTITY_KEY = 'tennis-strategy-online';
 
@@ -105,6 +145,12 @@ export const api = {
   register: (nickname: string) => call<Identity>('/api/players', undefined, { nickname }),
   recover: (code: string) => call<Identity>('/api/players/recover', undefined, { code }),
   me: (token: string) => call<{ player: OnlinePlayer & { rating: number } }>('/api/me', token),
+  startCup: (token: string) => call<{ cup: Cup }>('/api/cups', token, {}),
+  currentCup: (token: string) => call<{ cup: Cup | null }>('/api/cups/current', token),
+  cup: (token: string, id: string) => call<{ cup: Cup }>(`/api/cups/${id}`, token),
+  cupNext: (token: string, id: string) => call<MatchmakingResult>(`/api/cups/${id}/next`, token, {}),
+  abandonCup: (token: string, id: string) => call<{ cup: Cup }>(`/api/cups/${id}/abandon`, token, {}),
+  cupHistory: (token: string) => call<{ cups: Cup[] }>('/api/cups', token),
   matchmaking: (token: string) => call<MatchmakingResult>('/api/matchmaking', token, {}),
   cancelMatchmaking: (token: string) => call<{ ok: true }>('/api/matchmaking/cancel', token, {}),
   active: (token: string) => call<{ match: MatchView | null }>('/api/me/active', token),
