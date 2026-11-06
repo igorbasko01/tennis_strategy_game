@@ -1,5 +1,6 @@
 import type { ResolvedExchange } from '../engine/online';
 import type { Choice, PlayerIndex } from '../engine/resolution';
+import type { StyleId } from '../engine/styles';
 
 /** The online server. Override at build time with VITE_API_URL (e.g. a local `wrangler dev`). */
 export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://tennis-strategy.igorbasko.workers.dev';
@@ -8,12 +9,18 @@ export interface OnlinePlayer {
   id: string;
   nickname: string;
   tag: string;
-  rating: number;
+  /** Null for a bot. */
+  rating: number | null;
+  /** Set when this opponent is a server-side bot. */
+  bot?: { style: StyleId };
 }
+
+/** Matchmaking: still looking, or the match that was found. */
+export type MatchmakingResult = { waiting: true; secondsLeft: number } | MatchView;
 
 /** This device's online identity: kept in the browser, separate from the single-player career. */
 export interface Identity {
-  player: OnlinePlayer;
+  player: OnlinePlayer & { rating: number };
   token: string;
   recoveryCode: string;
 }
@@ -25,6 +32,8 @@ export interface MatchView {
   status: 'waiting' | 'playing' | 'finished';
   you: OnlinePlayer;
   opponent: OnlinePlayer | null;
+  /** False for bot matches, which don't change ratings. */
+  rated: boolean;
   firstServer: PlayerIndex;
   /** Resolved exchanges from the `since` asked for. */
   exchanges: ResolvedExchange[];
@@ -95,7 +104,9 @@ const call = async <T>(path: string, token?: string, data?: unknown): Promise<T>
 export const api = {
   register: (nickname: string) => call<Identity>('/api/players', undefined, { nickname }),
   recover: (code: string) => call<Identity>('/api/players/recover', undefined, { code }),
-  me: (token: string) => call<{ player: OnlinePlayer }>('/api/me', token),
+  me: (token: string) => call<{ player: OnlinePlayer & { rating: number } }>('/api/me', token),
+  matchmaking: (token: string) => call<MatchmakingResult>('/api/matchmaking', token, {}),
+  cancelMatchmaking: (token: string) => call<{ ok: true }>('/api/matchmaking/cancel', token, {}),
   active: (token: string) => call<{ match: MatchView | null }>('/api/me/active', token),
   resign: (token: string, id: string) => call<MatchView>(`/api/matches/${id}/resign`, token, {}),
   history: (token: string) => call<{ matches: HistoryEntry[] }>('/api/me/matches', token),
@@ -106,7 +117,7 @@ export const api = {
     call<MatchView>(`/api/matches/${id}/moves`, token, { exchange, choice, since }),
 };
 
-export const displayName = (p: OnlinePlayer) => `${p.nickname}#${p.tag}`;
+export const displayName = (p: OnlinePlayer) => (p.bot ? `🤖 ${p.nickname}` : `${p.nickname}#${p.tag}`);
 
 /** The link that opens the game straight into joining a match. */
 export const inviteLink = (code: string) => {

@@ -95,7 +95,41 @@ const main = async () => {
   assert((await call('/api/me/active', b.token)).match === null, 'nothing left to resume');
   const h2 = await call('/api/me/matches', b.token);
   assert(h2.matches[0].resigned === 'you', 'history shows who resigned');
-  console.log(`OK: ${exchange} exchanges, sets ${JSON.stringify(la.score.completedSets)}, Alice ${meA.player.rating}, Bob ${meB.player.rating}`);
+  // Matchmaking: two players looking at the same time are paired with each other.
+  const c = await call('/api/players', undefined, { nickname: 'Cara' });
+  const d = await call('/api/players', undefined, { nickname: 'Dev' });
+  const first = await call('/api/matchmaking', c.token, {});
+  assert(first.waiting && first.secondsLeft > 0, 'the first player waits in the queue');
+  const paired = await call('/api/matchmaking', d.token, {});
+  assert(paired.status === 'playing' && paired.opponent.nickname === 'Cara' && paired.rated, 'the second player is paired with the first');
+  const found = await call('/api/matchmaking', c.token, {});
+  assert(found.id === paired.id && found.opponent.nickname === 'Dev', 'the first player finds the same match');
+  await call(`/api/matches/${paired.id}/resign`, c.token, {});
+
+  // Nobody else looking: a bot match starts after the wait, unrated, and the bot moves by itself.
+  const e = await call('/api/players', undefined, { nickname: 'Eve' });
+  let r = await call('/api/matchmaking', e.token, {});
+  while (r.waiting) {
+    await new Promise((res) => setTimeout(res, 1000));
+    r = await call('/api/matchmaking', e.token, {});
+  }
+  assert(r.opponent.bot && r.opponent.nickname.endsWith('Bot') && r.rated === false, 'a bot opponent after the wait');
+  assert(r.current.opponentLocked && !r.current.youLocked, 'the bot has already chosen, the player not yet');
+  const mirror = newOnlineMatch(['Me', 'Bot'], r.firstServer as PlayerIndex);
+  const ai = new AiOpponent();
+  let bot = r;
+  let n = 0;
+  while (bot.status === 'playing') {
+    bot = await call(`/api/matches/${bot.id}/moves`, e.token, { exchange: n, choice: ai.choose(mirror, 0), since: n });
+    for (const x of bot.exchanges as ResolvedExchange[]) playExchange(mirror, x.choices, replayRng(x.rolls));
+    n++;
+  }
+  assert(mirror.isOver && bot.winner === mirror.score.winner && bot.ratingChange === null, 'bot match finished, unrated');
+  const eve = await call('/api/me', e.token);
+  assert(eve.player.rating === 1000, 'rating unchanged after a bot match');
+  const eh = await call('/api/me/matches', e.token);
+  assert(eh.matches[0].opponent.bot && eh.matches[0].ratingChange === null, 'history shows the bot match');
+  console.log(`OK: ${exchange} exchanges, sets ${JSON.stringify(la.score.completedSets)}, Alice ${meA.player.rating}, Bob ${meB.player.rating}; bot match ${n} exchanges vs ${bot.opponent.nickname} (${bot.opponent.bot.style})`);
 };
 
 main().catch((e) => {
