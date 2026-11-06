@@ -74,12 +74,16 @@ button:focus-visible {
     'stage'
     'panel';
   grid-template-rows: auto minmax(0, 1fr) auto;
+  /* One column exactly as wide as the screen: long names in the scoreboard
+     must shrink (with an ellipsis), never widen the page. */
+  grid-template-columns: minmax(0, 1fr);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
 }
 
 #scoreboard {
   grid-area: score;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -107,6 +111,7 @@ button:focus-visible {
 
 #panel {
   grid-area: panel;
+  min-width: 0;
   background: var(--surface);
   border-top: 1px solid var(--border);
   padding: 10px 12px calc(10px + var(--safe-bottom));
@@ -172,10 +177,40 @@ button:focus-visible {
 .sb-name {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
+}
+
+/* When space is short the style label gives way first, then the name. */
+.sb-name .sb-label,
+.sb-name .style {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sb-name .sb-label {
+  flex: 0 1 auto;
+}
+
+.sb-name .style {
+  flex: 0 1000 auto;
+}
+
+/* On small phones the scoreboard shows only the style's icon. */
+@media (max-width: 420px) {
+  .sb-name .style-name {
+    display: none;
+  }
+}
+
+.sb-name .player-dot {
+  flex: none;
+  align-self: center;
 }
 
 .set {
@@ -441,20 +476,22 @@ button:focus-visible {
 }
 
 .options.n3 {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .options.n4 {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 @media (max-width: 380px) {
   .options.n4 {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 .opt {
+  min-width: 0;
+  overflow-wrap: anywhere;
   min-height: 52px;
   padding: 6px 4px;
   border-radius: 12px;
@@ -714,7 +751,6 @@ button:focus-visible {
 }
 
 .sb-name .style {
-  display: inline;
   font-weight: 500;
   font-size: 12px;
   color: var(--muted);
