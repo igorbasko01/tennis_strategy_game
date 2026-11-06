@@ -1147,7 +1147,7 @@ export class App {
       return `
         <div class="sb-row">
           <span class="serve-dot ${m.server === p && !m.isOver ? 'on' : ''}"></span>
-          <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}${p === 1 && this.setup && (!this.setup.online || this.setup.online.view.opponent?.bot) ? ` <small class="style">${STYLES[this.setup.cpuStyle].icon} ${STYLES[this.setup.cpuStyle].label}</small>` : ''}</span>
+          <span class="sb-name"><span class="player-dot p${p}"></span><span class="sb-label">${escapeHtml(this.names[p])}</span>${p === 1 && this.setup && (!this.setup.online || this.setup.online.view.opponent?.bot) ? `<small class="style" title="${STYLES[this.setup.cpuStyle].label}">${STYLES[this.setup.cpuStyle].icon}<span class="style-name"> ${STYLES[this.setup.cpuStyle].label}</span></small>` : ''}</span>
           ${m.isOver ? '' : this.energyBar(m.energy[p])}
           ${sets}
           <span class="set current">${m.isOver ? '' : m.score.games[p]}</span>
