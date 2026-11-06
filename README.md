@@ -14,7 +14,7 @@ Outsmart your opponent by choosing your shots and anticipating theirs. Both play
 
 ## 🌐 Play in the browser
 
-A web version built with three.js lives in [`webapp/`](webapp/). It runs on phones and desktops and deploys to GitHub Pages or Cloudflare Pages. See [webapp/README.md](webapp/README.md).
+A web version built with three.js lives in [`webapp/`](webapp/). It runs on phones and desktops and is served at https://tennisim.baskorp.com. See [webapp/README.md](webapp/README.md).
 
 ```bash
 cd webapp && npm install && npm run dev

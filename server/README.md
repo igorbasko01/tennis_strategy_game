@@ -1,6 +1,6 @@
 # Tennis Strategy — online server
 
-A Cloudflare Worker with a D1 (SQLite) database that runs online matches between two players.
+A Cloudflare Worker with a D1 (SQLite) database that runs online matches between two players. It also serves the built web app, so the whole game is at https://tennisim.baskorp.com (the API under `/api/*`).
 
 ## How it works
 

@@ -51,19 +51,8 @@ src/
 
 ## Deploy
 
-**Online server:** `server/` is a Cloudflare Worker with a D1 database (`.github/workflows/deploy-server.yml` applies migrations and deploys on every push to `main` that touches `server/` or the engine; it needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`). The web app talks to `https://tennis-strategy.igorbasko.workers.dev` unless built with `VITE_API_URL`. See `server/README.md`.
+The game is served at **https://tennisim.baskorp.com** by one Cloudflare Worker (`server/`): it serves the built web app (`webapp/dist`) and the online server under `/api/*`, so both share the same address. `.github/workflows/deploy-server.yml` tests and builds the web app, applies D1 migrations and deploys on every push to `main` that touches `webapp/` or `server/`; it needs the repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts Edit, Workers Routes Edit, D1 Edit) and `CLOUDFLARE_ACCOUNT_ID`. The custom domain is set in `server/wrangler.toml`; Cloudflare creates its DNS record and certificate.
 
-The build output is static (`webapp/dist`) and uses relative asset paths, so it can be served from any sub-path.
+The web app calls the online server on its own address. For local development run `wrangler dev` in `server/` (it also serves the built app at http://localhost:8787), or run `vite` with `VITE_API_URL=http://localhost:8787`.
 
-**GitHub Pages:** `.github/workflows/deploy-web.yml` tests, builds and deploys on every push to `main` that touches `webapp/`.
-Enable it once under *Settings → Pages → Build and deployment → Source: GitHub Actions*.
-The game is then served at `https://<user>.github.io/<repo>/`.
-
-**Cloudflare Pages:** create a project connected to this repo with:
-
-| Setting                | Value             |
-| ---------------------- | ----------------- |
-| Root directory         | `webapp`          |
-| Build command          | `npm run build`   |
-| Build output directory | `dist`            |
-| Environment variable   | `NODE_VERSION=22` |
+The old GitHub Pages address only redirects to the new one (`pages-redirect/`, deployed by `.github/workflows/deploy-web.yml`), keeping invite links working.
