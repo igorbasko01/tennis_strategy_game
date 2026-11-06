@@ -652,7 +652,7 @@ export class App {
       if (s.view.status === 'playing') await sleep(POLL_MS);
     }
     const me = s.view.you;
-    if (this.identity && me) {
+    if (this.identity && me && me.rating !== null) {
       this.identity = { ...this.identity, player: { ...this.identity.player, rating: me.rating } };
       saveIdentity(this.identity);
     }
@@ -709,7 +709,7 @@ export class App {
       skills: [ONLINE_SKILL, ONLINE_SKILL],
       scoring: MATCH_SCORING,
       tournament: false,
-      cpuStyle: 'balanced',
+      cpuStyle: view.opponent?.bot?.style ?? 'balanced',
       energy: [FULL_ENERGY, FULL_ENERGY],
       online: {
         id: view.id,
@@ -777,13 +777,15 @@ export class App {
       <p class="tagline">${escapeHtml(displayName(id.player))} · online rating <b>${id.player.rating}</b></p>
       ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
       ${this.activeOnline ? `<button class="primary big" data-act="resume">Resume match vs ${escapeHtml(this.activeOnline.opponent?.nickname ?? 'opponent')}</button>` : ''}
+      <button class="primary big" data-act="find">Find an opponent</button>
       <button class="primary big" data-act="invite">Invite a friend</button>
-      <button class="primary big" data-act="join">Join with a code</button>
+      <button class="ghost" data-act="join">Join with a code</button>
       <button class="ghost" data-act="history">Online history</button>
       <button class="ghost" data-act="recovery">Recovery code</button>
       <button class="ghost" data-act="menu">Main menu</button>`);
     const el = $('#online');
     el.querySelector('[data-act="resume"]')?.addEventListener('click', () => this.resumeOnline());
+    el.querySelector('[data-act="find"]')!.addEventListener('click', () => void this.findOpponent());
     el.querySelector('[data-act="invite"]')!.addEventListener('click', () => void this.inviteOnline());
     el.querySelector('[data-act="join"]')!.addEventListener('click', () => this.renderOnlineJoin());
     el.querySelector('[data-act="history"]')!.addEventListener('click', () => void this.renderOnlineHistory());
@@ -816,6 +818,42 @@ export class App {
           if (gen === this.onlineGen) this.renderOnline('This device was signed out. Choose a nickname or use your recovery code.');
         }
       });
+  }
+
+  /** Matchmaking: a person if one is looking, otherwise a bot after a short wait. */
+  private async findOpponent(): Promise<void> {
+    const id = this.identity!;
+    this.renderOnlineCard(`
+      <h2>Find an opponent</h2>
+      <p class="waiting">Looking for an opponent…</p>
+      <p class="small">If nobody is around, you’ll play a bot instead (unrated).</p>
+      <button class="ghost" data-act="cancel">Cancel</button>`);
+    const gen = this.onlineGen;
+    const el = $('#online');
+    el.querySelector('[data-act="cancel"]')!.addEventListener('click', () => {
+      void api.cancelMatchmaking(id.token).catch(() => undefined);
+      this.renderOnline();
+    });
+    let failures = 0;
+    while (gen === this.onlineGen) {
+      try {
+        const r = await api.matchmaking(id.token);
+        failures = 0;
+        if (gen !== this.onlineGen) return;
+        if ('waiting' in r) {
+          el.querySelector('.waiting')!.textContent = `Looking for an opponent… ${r.secondsLeft}s, then a bot`;
+        } else {
+          this.startOnlineMatch(r, id.token);
+          return;
+        }
+      } catch (e) {
+        if (++failures > 3) {
+          this.renderOnline((e as Error).message);
+          return;
+        }
+      }
+      await sleep(1000);
+    }
   }
 
   private async inviteOnline(): Promise<void> {
@@ -1109,7 +1147,7 @@ export class App {
       return `
         <div class="sb-row">
           <span class="serve-dot ${m.server === p && !m.isOver ? 'on' : ''}"></span>
-          <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}${p === 1 && this.setup && !this.setup.online ? ` <small class="style">${STYLES[this.setup.cpuStyle].icon} ${STYLES[this.setup.cpuStyle].label}</small>` : ''}</span>
+          <span class="sb-name"><span class="player-dot p${p}"></span>${escapeHtml(this.names[p])}${p === 1 && this.setup && (!this.setup.online || this.setup.online.view.opponent?.bot) ? ` <small class="style">${STYLES[this.setup.cpuStyle].icon} ${STYLES[this.setup.cpuStyle].label}</small>` : ''}</span>
           ${m.isOver ? '' : this.energyBar(m.energy[p])}
           ${sets}
           <span class="set current">${m.isOver ? '' : m.score.games[p]}</span>
@@ -1177,7 +1215,11 @@ export class App {
     const online = this.setup?.online;
     if (online) {
       const change = online.view.ratingChange;
-      subtitle = change === null ? 'Online match' : `Online rating ${fmtRating(change)} → ${online.view.you.rating}`;
+      subtitle = !online.view.rated
+        ? 'Unrated match against a bot'
+        : change === null
+          ? 'Online match'
+          : `Online rating ${fmtRating(change)} → ${online.view.you.rating}`;
     }
     const el = $('#over');
     el.innerHTML = `
@@ -1563,7 +1605,10 @@ export class App {
       choices, so watch what your opponent does and adapt. Styles are dealt out again when you start fresh.</p>
       <ul>${STYLE_IDS.map((id) => `<li>${STYLES[id].icon} <b>${STYLES[id].label}</b>: ${STYLES[id].description}</li>`).join('')}</ul>
       <h3>Playing online</h3>
-      <p>Play online invites a friend by link or code. Both of you play at skill 0.50, so only your decisions and the
+      <p>Find an opponent pairs you with another player who is looking, closest rating first. If nobody turns up
+      within 15 seconds you play a bot instead: it's shown as 🤖 with its playing style, it can't see your choices,
+      and bot matches don't change your rating.</p>
+      <p>Play online can also invite a friend by link or code. Both of you play at skill 0.50, so only your decisions and the
       dice count. Choices are revealed together once both of you have locked in, and there's no time limit. If you
       reload or come back later, Resume online match picks up where you left off; Resign (in the menu) ends it as a loss. Your
       online rating starts at 1000 and moves like chess Elo; it's separate from your career skill.</p>

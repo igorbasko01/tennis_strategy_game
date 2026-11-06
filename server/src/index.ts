@@ -6,6 +6,8 @@ import {
   replay,
 } from '../../webapp/src/engine/online';
 import type { Choice, PlayerIndex } from '../../webapp/src/engine/resolution';
+import { AiOpponent } from '../../webapp/src/engine/ai';
+import { STYLES, type StyleId } from '../../webapp/src/engine/styles';
 
 export interface Env {
   DB: D1Database;
@@ -13,6 +15,11 @@ export interface Env {
 
 /** An invite nobody joins expires after this long, and its code can be reused. */
 const INVITE_TTL_MS = 60 * 60 * 1000;
+/** How long matchmaking looks for a person before bringing in a bot. */
+const MATCHMAKING_SECONDS = 15;
+/** A queued player who stops checking in for this long is skipped (they left). */
+const QUEUE_STALE_MS = 6000;
+const BOT_NAMES = ['Ace', 'Volley', 'Slice', 'Topspin', 'Rally', 'Smash', 'Lob', 'Baseline'];
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -33,6 +40,9 @@ interface MatchRow {
   winner: number | null;
   resigned: number | null;
   rating_change: number | null;
+  bot_style: StyleId | null;
+  bot_name: string | null;
+  rated: number;
   created_at: number;
   finished_at: number | null;
 }
@@ -84,6 +94,9 @@ const body = async (req: Request): Promise<Record<string, unknown>> => {
 };
 
 const publicPlayer = (p: PlayerRow) => ({ id: p.id, nickname: p.nickname, tag: p.tag, rating: p.rating });
+
+/** A bot opponent, shown as a bot with its playing style. */
+const botPlayer = (m: MatchRow) => ({ id: 'bot', nickname: m.bot_name ?? 'Bot', tag: 'BOT', rating: null, bot: { style: m.bot_style } });
 
 const authenticate = async (req: Request, env: Env): Promise<PlayerRow> => {
   const token = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
@@ -165,6 +178,15 @@ const insertMove = (env: Env, matchId: string, exchange: number, seat: number, c
 
 /** Ends a match once, and moves both players' ratings. */
 const finish = async (env: Env, m: MatchRow, winner: PlayerIndex, resigned: PlayerIndex | null = null) => {
+  if (!m.rated) {
+    // Bot matches are unrated.
+    await env.DB.prepare(
+      "UPDATE matches SET status = 'finished', winner = ?, resigned = ?, finished_at = ? WHERE id = ? AND status = 'playing'",
+    )
+      .bind(winner, resigned, Date.now(), m.id)
+      .run();
+    return;
+  }
   const players = await env.DB.prepare('SELECT id, rating FROM players WHERE id IN (?, ?)').bind(m.seat0, m.seat1).all<{ id: string; rating: number }>();
   const rating = (id: string | null) => players.results.find((p) => p.id === id)?.rating ?? 1000;
   const [w, l] = winner === 0 ? [m.seat0, m.seat1!] : [m.seat1!, m.seat0];
@@ -183,14 +205,25 @@ const finish = async (env: Env, m: MatchRow, winner: PlayerIndex, resigned: Play
   }
 };
 
-/** Ends the match (once) if its last exchange has been played. */
+/**
+ * Ends the match (once) if its last exchange has been played. In a bot match it
+ * also makes the bot's choice for the current exchange: from its style alone,
+ * so it never depends on what the player chose.
+ */
 const advance = async (env: Env, id: string): Promise<MatchRow> => {
   const m = await loadMatch(env, id);
   if (m.status !== 'playing') return m;
-  const { match } = replay(m.seed, pairsOf(await loadMoves(env, id)));
-  if (!match.isOver) return m;
-  await finish(env, m, match.score.winner!);
-  return loadMatch(env, id);
+  const pairs = pairsOf(await loadMoves(env, id));
+  const { match, resolved } = replay(m.seed, pairs);
+  if (match.isOver) {
+    await finish(env, m, match.score.winner!);
+    return loadMatch(env, id);
+  }
+  if (m.bot_style && !pairs[resolved.length]?.[1]) {
+    const bot = new AiOpponent(Math.random, STYLES[m.bot_style]);
+    await insertMove(env, id, resolved.length, 1, bot.choose(match, 1));
+  }
+  return m;
 };
 
 /** The match as one seat sees it: always as player 0, with every resolved exchange from `since` on. */
@@ -204,6 +237,7 @@ const view = async (env: Env, m: MatchRow, seat: PlayerIndex, since = 0) => {
     return p ? publicPlayer(p) : null;
   };
   const rows = m.status === 'waiting' ? [] : await loadMoves(env, m.id);
+  const opponent = seat === 0 && m.bot_style ? botPlayer(m) : player(seat === 0 ? m.seat1 : m.seat0);
   const pairs = pairsOf(rows);
   const { resolved } = replay(m.seed, pairs);
   const pending = pairs[resolved.length] ?? [null, null];
@@ -215,7 +249,8 @@ const view = async (env: Env, m: MatchRow, seat: PlayerIndex, since = 0) => {
     code: m.code,
     status: m.status,
     you: player(seat === 0 ? m.seat0 : m.seat1),
-    opponent: player(seat === 0 ? m.seat1 : m.seat0),
+    opponent,
+    rated: m.rated === 1,
     firstServer: orient(firstServer),
     exchanges: resolved.slice(since).map((x) => orientExchange(x, seat)),
     exchangeCount: resolved.length,
@@ -286,6 +321,88 @@ const submitMove = async (req: Request, me: PlayerRow, env: Env, id: string) => 
   return view(env, await advance(env, id), seat, Number(data.since ?? 0));
 };
 
+/** The bot's style follows the player's rating: newer players get easier-to-read styles. */
+const botStyleFor = (rating: number): StyleId => {
+  const pool: StyleId[] = rating < 1000 ? ['grinder', 'aggressor', 'touch'] : rating < 1100 ? ['aggressor', 'touch', 'balanced'] : ['balanced'];
+  return pool[crypto.getRandomValues(new Uint8Array(1))[0] % pool.length];
+};
+
+const startMatch = async (env: Env, seat0: string, seat1: string | null, bot: StyleId | null) => {
+  const id = randomHex(8);
+  const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+  const now = Date.now();
+  const name = bot ? `${BOT_NAMES[crypto.getRandomValues(new Uint8Array(1))[0] % BOT_NAMES.length]} Bot` : null;
+  await env.DB.prepare(
+    "INSERT INTO matches (id, code, seat0, seat1, seed, status, bot_style, bot_name, rated, created_at, started_at) VALUES (?, '', ?, ?, ?, 'playing', ?, ?, ?, ?, ?)",
+  )
+    .bind(id, seat0, seat1, seed, bot, name, bot ? 0 : 1, now, now)
+    .run();
+  return id;
+};
+
+/**
+ * Find an opponent: pairs with another waiting player (closest rating first) or
+ * joins the queue. The browser calls it every second or so; after
+ * MATCHMAKING_SECONDS with nobody found, a bot match starts instead.
+ */
+const matchmaking = async (me: PlayerRow, env: Env) => {
+  const now = Date.now();
+  let mine = await env.DB.prepare('SELECT * FROM queue WHERE player_id = ?')
+    .bind(me.id)
+    .first<{ joined_at: number; last_seen: number; match_id: string | null }>();
+  // Someone paired with us since we last checked.
+  if (mine?.match_id) {
+    const m = await env.DB.prepare('SELECT * FROM matches WHERE id = ?').bind(mine.match_id).first<MatchRow>();
+    // The match is being set up this very moment: check again shortly.
+    if (!m) return json({ waiting: true, secondsLeft: MATCHMAKING_SECONDS });
+    await env.DB.prepare('DELETE FROM queue WHERE player_id = ?').bind(me.id).run();
+    return view(env, m, 0);
+  }
+  // An old entry from a search we abandoned: start the wait again.
+  if (mine && mine.last_seen < now - QUEUE_STALE_MS) {
+    await env.DB.prepare('DELETE FROM queue WHERE player_id = ? AND match_id IS NULL').bind(me.id).run();
+    mine = null;
+  }
+  // Pair with the closest-rated player who is still waiting.
+  const other = await env.DB.prepare(
+    'SELECT player_id FROM queue WHERE player_id != ? AND match_id IS NULL AND last_seen > ? ORDER BY ABS(rating - ?), joined_at LIMIT 1',
+  )
+    .bind(me.id, now - QUEUE_STALE_MS, me.rating)
+    .first<{ player_id: string }>();
+  if (other) {
+    // Claim them first, so two players can't both take the same opponent.
+    const placeholder = randomHex(8);
+    const claimed = await env.DB.prepare('UPDATE queue SET match_id = ? WHERE player_id = ? AND match_id IS NULL').bind(placeholder, other.player_id).run();
+    if (claimed.meta.changes === 1) {
+      const id = await startMatch(env, other.player_id, me.id, null);
+      await env.DB.batch([
+        env.DB.prepare('UPDATE queue SET match_id = ? WHERE player_id = ?').bind(id, other.player_id),
+        env.DB.prepare('DELETE FROM queue WHERE player_id = ?').bind(me.id),
+      ]);
+      return view(env, await loadMatch(env, id), 1);
+    }
+  }
+  if (!mine) {
+    await env.DB.prepare('INSERT INTO queue (player_id, rating, joined_at, last_seen) VALUES (?, ?, ?, ?)').bind(me.id, me.rating, now, now).run();
+    return json({ waiting: true, secondsLeft: MATCHMAKING_SECONDS });
+  }
+  const waited = now - mine.joined_at;
+  if (waited < MATCHMAKING_SECONDS * 1000) {
+    await env.DB.prepare('UPDATE queue SET last_seen = ? WHERE player_id = ?').bind(now, me.id).run();
+    return json({ waiting: true, secondsLeft: Math.ceil((MATCHMAKING_SECONDS * 1000 - waited) / 1000) });
+  }
+  // Nobody came: leave the queue (unless someone paired with us this instant) and play a bot.
+  const left = await env.DB.prepare('DELETE FROM queue WHERE player_id = ? AND match_id IS NULL').bind(me.id).run();
+  if (left.meta.changes !== 1) return matchmaking(me, env);
+  const id = await startMatch(env, me.id, null, botStyleFor(me.rating));
+  return view(env, await advance(env, id), 0);
+};
+
+const cancelMatchmaking = async (me: PlayerRow, env: Env) => {
+  await env.DB.prepare('DELETE FROM queue WHERE player_id = ? AND match_id IS NULL').bind(me.id).run();
+  return json({ ok: true });
+};
+
 /** The player's unfinished match, if any, with every exchange so far so the browser can catch up. */
 const activeMatch = async (me: PlayerRow, env: Env) => {
   const m = await env.DB.prepare(
@@ -331,7 +448,7 @@ const history = async (me: PlayerRow, env: Env) => {
     matches.push({
       id: m.id,
       finishedAt: m.finished_at,
-      opponent: opp ? publicPlayer(opp) : null,
+      opponent: m.bot_style ? botPlayer(m) : opp ? publicPlayer(opp) : null,
       won,
       resigned: m.resigned === null ? null : m.resigned === seat ? 'you' : 'opponent',
       sets: match.score.completedSets.map((s) => (seat === 0 ? s : [s[1], s[0]])),
@@ -358,6 +475,8 @@ const route = async (req: Request, env: Env): Promise<Response> => {
   if (path === '/api/me/active' && method === 'GET') return activeMatch(me, env);
   if (path === '/api/matches' && method === 'POST') return createMatch(me, env);
   if (path === '/api/matches/join' && method === 'POST') return joinMatch(req, me, env);
+  if (path === '/api/matchmaking' && method === 'POST') return matchmaking(me, env);
+  if (path === '/api/matchmaking/cancel' && method === 'POST') return cancelMatchmaking(me, env);
   const matchPath = path.match(/^\/api\/matches\/([0-9a-f]{16})(\/moves|\/resign)?$/);
   if (matchPath && !matchPath[2] && method === 'GET') {
     const m = await advance(env, matchPath[1]);
