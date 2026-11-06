@@ -2,8 +2,11 @@ import type { ResolvedExchange } from '../engine/online';
 import type { Choice, PlayerIndex } from '../engine/resolution';
 import type { StyleId } from '../engine/styles';
 
-/** The online server. Override at build time with VITE_API_URL (e.g. a local `wrangler dev`). */
-export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://tennis-strategy.igorbasko.workers.dev';
+/**
+ * The online server: the same site the game is served from (tennisim.baskorp.com/api).
+ * Override at build time with VITE_API_URL, e.g. a local `wrangler dev` while running `vite`.
+ */
+export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
 
 export interface OnlinePlayer {
   id: string;

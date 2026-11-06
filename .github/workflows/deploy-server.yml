@@ -1,16 +1,18 @@
-name: Deploy online server to Cloudflare
+name: Deploy the game to Cloudflare
 
+# The Worker serves both the web app (built from webapp/) and the online server
+# (server/) at https://tennisim.baskorp.com.
 on:
   push:
     branches: [main]
     paths:
       - 'server/**'
-      - 'webapp/src/engine/**'
+      - 'webapp/**'
       - '.github/workflows/deploy-server.yml'
   pull_request:
     paths:
       - 'server/**'
-      - 'webapp/src/engine/**'
+      - 'webapp/**'
       - '.github/workflows/deploy-server.yml'
   workflow_dispatch:
 
@@ -20,10 +22,6 @@ permissions:
 concurrency:
   group: server-${{ github.ref }}
   cancel-in-progress: false
-
-defaults:
-  run:
-    working-directory: server
 
 jobs:
   deploy:
@@ -38,13 +36,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: server/package-lock.json
+          cache-dependency-path: |
+            webapp/package-lock.json
+            server/package-lock.json
+      - name: Build the web app
+        working-directory: webapp
+        run: |
+          npm ci
+          npm test
+          npm run build
       - run: npm ci
+        working-directory: server
       - run: npm run typecheck
+        working-directory: server
       # Pull requests only check that the Worker builds; main applies migrations and deploys.
       - run: npx wrangler deploy --dry-run --outdir dist
         if: github.event_name == 'pull_request'
+        working-directory: server
       - run: npx wrangler d1 migrations apply tennis-strategy --remote
         if: github.event_name != 'pull_request'
+        working-directory: server
       - run: npx wrangler deploy
         if: github.event_name != 'pull_request'
+        working-directory: server
